@@ -12,7 +12,25 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt -- --check
+      - run: cargo clippy --all-targets --all-features
+
   test:
+    needs: check
     runs-on: ubuntu-latest
 
     steps:
@@ -25,29 +43,7 @@ jobs:
           override: true
           components: rustfmt, clippy
 
-      - name: Cache Cargo registry
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo index
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache target directory
-        uses: actions/cache@v3
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
+      - uses: Swatinem/rust-cache@v2
 
       - name: Run tests
-        run: cargo test --verbose
-
-      - name: Check formatting
-        run: cargo fmt -- --check
-
-      - name: Run clippy
-        run: cargo clippy -- -D warnings
+        run: cargo test --all-features
