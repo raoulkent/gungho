@@ -15,34 +15,25 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          override: true
           components: rustfmt, clippy
-
       - uses: Swatinem/rust-cache@v2
 
       - run: cargo fmt -- --check
-      - run: cargo clippy --all-targets --all-features --- -D warnings
+      - run: cargo clippy --all-targets --all-features-- -D warnings
 
   test:
     needs: check
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          override: true
-          components: rustfmt, clippy
-
       - uses: Swatinem/rust-cache@v2
 
       - name: Run tests
@@ -53,5 +44,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-      - run: cargo install cargo-audit && cargo audit --all-features
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-audit && cargo audit
