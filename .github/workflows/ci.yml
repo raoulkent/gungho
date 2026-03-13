@@ -50,3 +50,15 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-audit && cargo audit
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Lint Helm chart
+        run: |
+          if [ -f charts/gungho/Chart.yaml ]; then
+            helm lint charts/gungho
+          else
+            echo "No chart found, skipping"
+          fi
