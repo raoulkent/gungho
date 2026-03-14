@@ -99,30 +99,30 @@ mod tests {
     #[test]
     fn test_parse_valid_config() {
         let config_str = r#"
-listen_addr = "0.0.0.0:8080"
-admin_addr = "0.0.0.0:9090"
-algorithm = "round_robin"
-max_connections = 1000
+            listen_addr = "0.0.0.0:8080"
+            admin_addr = "0.0.0.0:9090"
+            algorithm = "round_robin"
+            max_connections = 1000
 
-[[backends]]
-addr = "127.0.0.1:3000"
-weight = 1
+            [[backends]]
+            addr = "127.0.0.1:3000"
+            weight = 1
 
-[[backends]]
-addr = "127.0.0.1:3001"
-weight = 2
+            [[backends]]
+            addr = "127.0.0.1:3001"
+            weight = 2
 
-[health_check]
-path = "/health"
-interval_secs = 10
-timeout_secs = 5
-health_threshold = 3
-unhealthy_threshold = 3
+            [health_check]
+            path = "/health"
+            interval_secs = 10
+            timeout_secs = 5
+            health_threshold = 3
+            unhealthy_threshold = 3
 
-[timeouts]
-connect_timeout_secs = 5
-read_timeout_secs = 30
-write_timeout_secs = 30
+            [timeouts]
+            connect_timeout_secs = 5
+            read_timeout_secs = 30
+            write_timeout_secs = 30
         "#;
 
         let read_config = toml::from_str::<Config>(config_str);
