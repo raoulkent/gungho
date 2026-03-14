@@ -125,7 +125,7 @@ mod tests {
             write_timeout_secs = 30
         "#;
 
-        let read_config = toml::from_str::<Config>(config_str);
+        let config = toml::from_str::<Config>(config_str);
 
         let expected = Config {
             listen_addr: String::from("0.0.0.0:8080"),
@@ -156,7 +156,7 @@ mod tests {
             max_connections: 1000,
         };
 
-        assert_eq!(read_config.unwrap(), expected);
+        assert_eq!(config.unwrap(), expected);
     }
 
     #[test]
