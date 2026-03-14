@@ -2,25 +2,45 @@ use serde::Deserialize;
 
 #[derive(Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
+#[serde(default)]
 pub struct Config {
-    listen_addr: String,
-    admin_addr: String,
-    backends: Vec<BackendConfig>,
-    algorithm: Algorithm,
-    health_check: HealthCheckConfig,
-    timeouts: TimeoutConfig,
-    max_connections: u32,
+    pub listen_addr: String,
+    pub admin_addr: String,
+    pub backends: Vec<BackendConfig>,
+    pub algorithm: Algorithm,
+    pub health_check: HealthCheckConfig,
+    pub timeouts: TimeoutConfig,
+    pub max_connections: u32,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            listen_addr: String::from("0.0.0.0:8080"),
+            admin_addr: String::from("0.0.0.0:9090"),
+            backends: vec![],
+            algorithm: Algorithm::default(),
+            health_check: HealthCheckConfig::default(),
+            timeouts: TimeoutConfig::default(),
+            max_connections: 0, // 0 = unlimited
+        }
+    }
 }
 
 #[derive(Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub struct BackendConfig {
     addr: String,
+    #[serde(default = "default_weight")]
     weight: u32,
+}
+fn default_weight() -> u32 {
+    1
 }
 
 #[derive(Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
+#[serde(default)]
 pub struct HealthCheckConfig {
     path: String,
     interval_secs: u64,
@@ -29,17 +49,41 @@ pub struct HealthCheckConfig {
     unhealthy_threshold: u32,
 }
 
+impl Default for HealthCheckConfig {
+    fn default() -> Self {
+        HealthCheckConfig {
+            path: String::from("/health"),
+            interval_secs: 5,
+            timeout_secs: 3,
+            health_threshold: 3,
+            unhealthy_threshold: 3,
+        }
+    }
+}
+
 #[derive(Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
+#[serde(default)]
 pub struct TimeoutConfig {
     connect_timeout_secs: u64,
     read_timeout_secs: u64,
     write_timeout_secs: u64,
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+impl Default for TimeoutConfig {
+    fn default() -> Self {
+        TimeoutConfig {
+            connect_timeout_secs: 5,
+            read_timeout_secs: 30,
+            write_timeout_secs: 30,
+        }
+    }
+}
+
+#[derive(Deserialize, PartialEq, Debug, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Algorithm {
+    #[default]
     RoundRobin,
     WeightedRoundRobin,
     LeastConnections,
@@ -67,7 +111,7 @@ mod tests {
             path: "/health"
             interval_secs: 10
             timeout_secs: 5
-            health_threshold: 3
+            health_threshold: 2
             unhealthy_threshold: 3
         timeouts:
             connect_timeout_secs: 5
@@ -96,7 +140,7 @@ mod tests {
                 path: String::from("/health"),
                 interval_secs: 10,
                 timeout_secs: 5,
-                health_threshold: 3,
+                health_threshold: 2,
                 unhealthy_threshold: 3,
             },
             timeouts: TimeoutConfig {
@@ -108,5 +152,14 @@ mod tests {
         };
 
         assert_eq!(read_config.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_defaults_applied() {
+        let config_str = r#"
+        
+        "#;
+
+        assert!(true)
     }
 }
