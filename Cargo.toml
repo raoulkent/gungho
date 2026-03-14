@@ -10,7 +10,7 @@ hyper-util = { version = "0.1", features = ["tokio", "client-legacy", "http1"] }
 http-body-util = "0.1"
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
-serde_yaml_ng = "0.10"
+toml = "0.8"
 notify = "8"
 prometheus = "0.14"
 tokio-util = "0.7"
