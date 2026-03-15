@@ -1,4 +1,6 @@
 use serde::Deserialize;
+use std::collections::HashSet;
+use std::net::SocketAddr;
 
 #[derive(Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -24,6 +26,41 @@ impl Default for Config {
             timeouts: TimeoutConfig::default(),
             max_connections: 0, // 0 = unlimited
         }
+    }
+}
+
+enum ConfigValidationError {
+    ZeroBackends,
+    DuplicateBackendAddrs,
+    InvalidAddrs,
+}
+
+impl Config {
+    fn validate(&self) -> Result<(), ConfigValidationError> {
+        if self.backends.is_empty() {
+            return Err(ConfigValidationError::ZeroBackends);
+        }
+
+        if self
+            .backends
+            .iter()
+            .map(|b| &b.addr)
+            .collect::<HashSet<_>>()
+            .len()
+            != self.backends.len()
+        {
+            return Err(ConfigValidationError::DuplicateBackendAddrs);
+        }
+
+        if self
+            .backends
+            .iter()
+            .any(|b| b.addr.parse::<SocketAddr>().is_err())
+        {
+            return Err(ConfigValidationError::InvalidAddrs);
+        }
+
+        Ok(())
     }
 }
 
@@ -182,5 +219,11 @@ mod tests {
     #[test]
     fn test_reject_zero_backends() {
         let config_str = "";
+
+        let parsed = toml::from_str::<Config>(config_str).unwrap();
+
+        let result = parsed.validate();
+
+        assert!(result.is_err());
     }
 }
