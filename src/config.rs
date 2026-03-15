@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 
 // --- Error types ---
 
+#[derive(Debug, PartialEq)]
 enum ConfigValidationError {
     ZeroBackends,
     DuplicateBackendAddrs,
@@ -234,5 +235,25 @@ mod tests {
         let result = parsed.validate();
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reject_duplicate_backend_addrs() {
+        let config_str = r#"
+            [[backends]]
+            addr = "0.0.0.0:3000"
+
+            [[backends]]
+            addr = "0.0.0.0:3000"
+        "#;
+
+        let parsed = toml::from_str::<Config>(config_str).unwrap();
+
+        let result = parsed.validate();
+
+        assert_eq!(
+            result.err(),
+            Some(ConfigValidationError::DuplicateBackendAddrs)
+        );
     }
 }
