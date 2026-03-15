@@ -2,32 +2,7 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 
-#[derive(Deserialize, PartialEq, Debug)]
-#[serde(rename_all = "snake_case")]
-#[serde(default)]
-pub struct Config {
-    pub listen_addr: String,
-    pub admin_addr: String,
-    pub backends: Vec<BackendConfig>,
-    pub algorithm: Algorithm,
-    pub health_check: HealthCheckConfig,
-    pub timeouts: TimeoutConfig,
-    pub max_connections: u32,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            listen_addr: String::from("0.0.0.0:8080"),
-            admin_addr: String::from("0.0.0.0:9090"),
-            backends: vec![],
-            algorithm: Algorithm::default(),
-            health_check: HealthCheckConfig::default(),
-            timeouts: TimeoutConfig::default(),
-            max_connections: 0, // 0 = unlimited
-        }
-    }
-}
+// --- Error types ---
 
 enum ConfigValidationError {
     ZeroBackends,
@@ -35,33 +10,17 @@ enum ConfigValidationError {
     InvalidAddrs,
 }
 
-impl Config {
-    fn validate(&self) -> Result<(), ConfigValidationError> {
-        if self.backends.is_empty() {
-            return Err(ConfigValidationError::ZeroBackends);
-        }
+// --- Supporting types ---
 
-        if self
-            .backends
-            .iter()
-            .map(|b| &b.addr)
-            .collect::<HashSet<_>>()
-            .len()
-            != self.backends.len()
-        {
-            return Err(ConfigValidationError::DuplicateBackendAddrs);
-        }
-
-        if self
-            .backends
-            .iter()
-            .any(|b| b.addr.parse::<SocketAddr>().is_err())
-        {
-            return Err(ConfigValidationError::InvalidAddrs);
-        }
-
-        Ok(())
-    }
+#[derive(Deserialize, PartialEq, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Algorithm {
+    #[default]
+    RoundRobin,
+    WeightedRoundRobin,
+    LeastConnections,
+    IpHash,
+    Random,
 }
 
 #[derive(Deserialize, PartialEq, Debug)]
@@ -71,6 +30,7 @@ pub struct BackendConfig {
     #[serde(default = "default_weight")]
     weight: u32,
 }
+
 fn default_weight() -> u32 {
     1
 }
@@ -117,16 +77,65 @@ impl Default for TimeoutConfig {
     }
 }
 
-#[derive(Deserialize, PartialEq, Debug, Default)]
+// --- Primary type ---
+
+#[derive(Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum Algorithm {
-    #[default]
-    RoundRobin,
-    WeightedRoundRobin,
-    LeastConnections,
-    IpHash,
-    Random,
+#[serde(default)]
+pub struct Config {
+    pub listen_addr: String,
+    pub admin_addr: String,
+    pub backends: Vec<BackendConfig>,
+    pub algorithm: Algorithm,
+    pub health_check: HealthCheckConfig,
+    pub timeouts: TimeoutConfig,
+    pub max_connections: u32,
 }
+
+impl Config {
+    fn validate(&self) -> Result<(), ConfigValidationError> {
+        if self.backends.is_empty() {
+            return Err(ConfigValidationError::ZeroBackends);
+        }
+
+        if self
+            .backends
+            .iter()
+            .map(|b| &b.addr)
+            .collect::<HashSet<_>>()
+            .len()
+            != self.backends.len()
+        {
+            return Err(ConfigValidationError::DuplicateBackendAddrs);
+        }
+
+        if self
+            .backends
+            .iter()
+            .any(|b| b.addr.parse::<SocketAddr>().is_err())
+        {
+            return Err(ConfigValidationError::InvalidAddrs);
+        }
+
+        Ok(())
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            listen_addr: String::from("0.0.0.0:8080"),
+            admin_addr: String::from("0.0.0.0:9090"),
+            backends: vec![],
+            algorithm: Algorithm::default(),
+            health_check: HealthCheckConfig::default(),
+            timeouts: TimeoutConfig::default(),
+            max_connections: 0, // 0 = unlimited
+        }
+    }
+}
+
+// --- Tests ---
 
 #[cfg(test)]
 mod tests {
