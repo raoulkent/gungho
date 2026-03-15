@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::net::SocketAddr;
+use std::path::Path;
 
 // --- Error types ---
 #[derive(thiserror::Error, Debug, PartialEq)]
@@ -123,7 +124,7 @@ impl Config {
         Ok(())
     }
 
-    fn from_file(path: String) -> Result<Self, Box<dyn std::error::Error>> {
+    fn from_file(path: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
         let contents = std::fs::read_to_string(path)?;
         let config: Config = toml::from_str(&contents)?;
         config.validate()?;
