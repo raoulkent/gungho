@@ -270,4 +270,30 @@ mod tests {
 
         assert_eq!(result.err(), Some(ConfigValidationError::InvalidAddrs));
     }
+
+    #[test]
+    fn test_all_algorithms_parsed() {
+        let algorithms = vec![
+            ("round_robin", Algorithm::RoundRobin),
+            ("weighted_round_robin", Algorithm::WeightedRoundRobin),
+            ("least_connections", Algorithm::LeastConnections),
+            ("ip_hash", Algorithm::IpHash),
+            ("random", Algorithm::Random),
+        ];
+
+        for (alg_str, expected_alg) in algorithms {
+            let config_str = format!(
+                r#"
+                algorithm = "{alg_str}"
+
+                [[backends]]
+                addr = "0.0.0.0:3000"
+            "#
+            );
+
+            let parsed = toml::from_str::<Config>(&config_str).unwrap();
+
+            assert_eq!(parsed.algorithm, expected_alg);
+        }
+    }
 }
