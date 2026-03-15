@@ -234,7 +234,7 @@ mod tests {
 
         let result = parsed.validate();
 
-        assert!(result.is_err());
+        assert_eq!(result.err(), Some(ConfigValidationError::ZeroBackends));
     }
 
     #[test]
