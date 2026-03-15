@@ -272,6 +272,18 @@ mod tests {
     }
 
     #[test]
+    fn test_reject_missing_fields() {
+        let config_str = r#"
+            [[backends]]
+            weight = 1
+        "#;
+
+        let parsed = toml::from_str::<Config>(config_str);
+
+        assert!(parsed.is_err());
+    }
+
+    #[test]
     fn test_all_algorithms_parsed() {
         let algorithms = vec![
             ("round_robin", Algorithm::RoundRobin),
