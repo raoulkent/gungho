@@ -318,4 +318,29 @@ mod tests {
             assert_eq!(parsed.algorithm, expected_alg);
         }
     }
+
+    #[test]
+    fn test_read_config_from_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+
+        let config_str = r#"
+            [[backends]]
+            addr = "0.0.0.0:3000"
+        "#;
+
+        let mut file = std::fs::File::create(&config_path).unwrap();
+        let _ = std::io::Write::write_all(&mut file, config_str.as_bytes());
+        let config = Config::from_file(&config_path).unwrap();
+
+        let expected = Config {
+            backends: vec![BackendConfig {
+                addr: String::from("0.0.0.0:3000"),
+                weight: default_weight(),
+            }],
+            ..Config::default()
+        };
+
+        assert_eq!(config, expected);
+    }
 }
