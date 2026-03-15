@@ -161,10 +161,26 @@ mod tests {
 
     #[test]
     fn test_defaults_applied() {
+        let config_str = r#"
+            [[backends]]
+            addr = "127.0.0.1:3000"
+        "#;
+
+        let config = toml::from_str::<Config>(config_str).unwrap();
+
+        let expected = Config {
+            backends: vec![BackendConfig {
+                addr: String::from("127.0.0.1:3000"),
+                weight: default_weight(),
+            }],
+            ..Config::default()
+        };
+
+        assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn test_reject_zero_backends() {
         let config_str = "";
-
-        let config: Config = toml::from_str(config_str).unwrap();
-
-        assert_eq!(config, Config::default());
     }
 }
