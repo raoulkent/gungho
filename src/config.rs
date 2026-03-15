@@ -3,11 +3,13 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 
 // --- Error types ---
-
-#[derive(Debug, PartialEq)]
+#[derive(thiserror::Error, Debug, PartialEq)]
 enum ConfigValidationError {
+    #[error("configuration must have at least one backend")]
     ZeroBackends,
+    #[error("backend addresses must be unique")]
     DuplicateBackendAddrs,
+    #[error("all backend addresses must be valid socket addresses")]
     InvalidAddrs,
 }
 
@@ -119,6 +121,13 @@ impl Config {
         }
 
         Ok(())
+    }
+
+    fn from_file(path: String) -> Result<Self, Box<dyn std::error::Error>> {
+        let contents = std::fs::read_to_string(path)?;
+        let config: Config = toml::from_str(&contents)?;
+        config.validate()?;
+        Ok(config)
     }
 }
 
