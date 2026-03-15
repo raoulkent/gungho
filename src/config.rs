@@ -256,4 +256,18 @@ mod tests {
             Some(ConfigValidationError::DuplicateBackendAddrs)
         );
     }
+
+    #[test]
+    fn test_reject_invalid_backend_addrs() {
+        let config_str = r#"
+            [[backends]]
+            addr = "invalid_addr"
+        "#;
+
+        let parsed = toml::from_str::<Config>(config_str).unwrap();
+
+        let result = parsed.validate();
+
+        assert_eq!(result.err(), Some(ConfigValidationError::InvalidAddrs));
+    }
 }
