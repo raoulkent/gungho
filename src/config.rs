@@ -5,7 +5,7 @@ use std::path::Path;
 
 // --- Error types ---
 #[derive(thiserror::Error, Debug, PartialEq)]
-enum ConfigValidationError {
+pub enum ConfigValidationError {
     #[error("configuration must have at least one backend")]
     ZeroBackends,
     #[error("backend addresses must be unique")]
@@ -97,7 +97,7 @@ pub struct Config {
 }
 
 impl Config {
-    fn validate(&self) -> Result<(), ConfigValidationError> {
+    pub fn validate(&self) -> Result<(), ConfigValidationError> {
         if self.backends.is_empty() {
             return Err(ConfigValidationError::ZeroBackends);
         }
@@ -124,7 +124,7 @@ impl Config {
         Ok(())
     }
 
-    fn from_file(path: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_file(path: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
         let contents = std::fs::read_to_string(path)?;
         let config: Config = toml::from_str(&contents)?;
         config.validate()?;
