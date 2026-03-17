@@ -30,9 +30,9 @@ pub enum Algorithm {
 #[derive(Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub struct BackendConfig {
-    addr: String,
+    pub addr: String,
     #[serde(default = "default_weight")]
-    weight: u32,
+    pub weight: u32,
 }
 
 fn default_weight() -> u32 {
