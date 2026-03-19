@@ -27,7 +27,7 @@ pub enum Algorithm {
     Random,
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub struct BackendConfig {
     pub addr: String,

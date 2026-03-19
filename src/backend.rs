@@ -1,6 +1,7 @@
 use crate::config::{BackendConfig, Config};
 use std::net::{AddrParseError, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 
 struct Backend {
@@ -55,6 +56,14 @@ impl BackendPool {
             backends: backends.into_iter().map(Arc::new).collect(),
         })
     }
+
+    fn healthy_backends(&self) -> Vec<Arc<Backend>> {
+        self.backends
+            .iter()
+            .filter(|b| b.healthy.load(Ordering::SeqCst))
+            .cloned()
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -63,7 +72,31 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn test_pool_from_config() {}
+    fn test_pool_from_config() {
+        let backends = [
+            BackendConfig {
+                addr: "0.0.0.0:8080".to_string(),
+                weight: 1,
+            },
+            BackendConfig {
+                addr: "0.0.0.1:8080".to_string(),
+                weight: 2,
+            },
+        ];
+
+        let config = Config {
+            backends: backends.to_vec(),
+            ..Config::default()
+        };
+
+        let BackendPool { backends } = BackendPool::from_config(&config).unwrap();
+
+        assert_eq!(backends.len(), 2);
+        assert_eq!(
+            backends[0].addr,
+            "0.0.0.0:8080".parse::<SocketAddr>().unwrap()
+        );
+    }
 
     #[test]
     fn test_healthy_filter() {}
