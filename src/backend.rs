@@ -89,20 +89,62 @@ mod tests {
             ..Config::default()
         };
 
-        let BackendPool { backends } = BackendPool::from_config(&config).unwrap();
+        let pool = BackendPool::from_config(&config).unwrap();
 
-        assert_eq!(backends.len(), 2);
+        assert_eq!(pool.backends.len(), 2);
         assert_eq!(
-            backends[0].addr,
+            pool.backends[0].addr,
             "0.0.0.0:8080".parse::<SocketAddr>().unwrap()
         );
     }
 
     #[test]
-    fn test_healthy_filter() {}
+    fn test_healthy_filter() {
+        let backends = [
+            BackendConfig {
+                addr: "0.0.0.0:8080".to_string(),
+                weight: 1,
+            },
+            BackendConfig {
+                addr: "0.0.0.1:8080".to_string(),
+                weight: 2,
+            },
+        ];
+
+        let config = Config {
+            backends: backends.to_vec(),
+            ..Config::default()
+        };
+
+        let pool = BackendPool::from_config(&config).unwrap();
+
+        assert_eq!(pool.healthy_backends().len(), 2);
+    }
 
     #[test]
-    fn test_mark_unhealthy() {}
+    fn test_mark_unhealthy() {
+        let backends = [
+            BackendConfig {
+                addr: "0.0.0.0:8080".to_string(),
+                weight: 1,
+            },
+            BackendConfig {
+                addr: "0.0.0.1:8080".to_string(),
+                weight: 2,
+            },
+        ];
+
+        let config = Config {
+            backends: backends.to_vec(),
+            ..Config::default()
+        };
+
+        let pool = BackendPool::from_config(&config).unwrap();
+
+        pool.backends[0].healthy.store(false, Ordering::SeqCst);
+
+        assert_eq!(pool.healthy_backends().len(), 1);
+    }
 
     #[test]
     fn test_mark_healthy_recovery() {}
