@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 
 // --- Error types ---
-#[derive(thiserror::Error, Debug, PartialEq)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq)]
 pub enum ConfigValidationError {
     #[error("configuration must have at least one backend")]
     ZeroBackends,
@@ -16,7 +16,7 @@ pub enum ConfigValidationError {
 
 // --- Supporting types ---
 
-#[derive(Deserialize, PartialEq, Debug, Default)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Algorithm {
     #[default]
@@ -27,7 +27,7 @@ pub enum Algorithm {
     Random,
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub struct BackendConfig {
     addr: String,
@@ -35,55 +35,58 @@ pub struct BackendConfig {
     weight: u32,
 }
 
-fn default_weight() -> u32 {
+const fn default_weight() -> u32 {
     1
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 #[serde(default)]
 pub struct HealthCheckConfig {
     path: String,
-    interval_secs: u64,
-    timeout_secs: u64,
+    /// Interval between health checks in seconds
+    interval: u64,
+    /// Timeout for each health check request in seconds
+    timeout: u64,
     health_threshold: u32,
     unhealthy_threshold: u32,
 }
 
 impl Default for HealthCheckConfig {
     fn default() -> Self {
-        HealthCheckConfig {
+        Self {
             path: String::from("/health"),
-            interval_secs: 5,
-            timeout_secs: 3,
+            interval: 5,
+            timeout: 3,
             health_threshold: 3,
             unhealthy_threshold: 3,
         }
     }
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 #[serde(default)]
+/// Timeouts for backend connections in seconds
 pub struct TimeoutConfig {
-    connect_timeout_secs: u64,
-    read_timeout_secs: u64,
-    write_timeout_secs: u64,
+    connect: u64,
+    read: u64,
+    write: u64,
 }
 
 impl Default for TimeoutConfig {
     fn default() -> Self {
-        TimeoutConfig {
-            connect_timeout_secs: 5,
-            read_timeout_secs: 30,
-            write_timeout_secs: 30,
+        Self {
+            connect: 5,
+            read: 30,
+            write: 30,
         }
     }
 }
 
 // --- Primary type ---
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 #[serde(default)]
 pub struct Config {
@@ -126,7 +129,7 @@ impl Config {
 
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
         let contents = std::fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&contents)?;
+        let config: Self = toml::from_str(&contents)?;
         config.validate()?;
         Ok(config)
     }
@@ -134,7 +137,7 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Config {
+        Self {
             listen_addr: String::from("0.0.0.0:8080"),
             admin_addr: String::from("0.0.0.0:9090"),
             backends: vec![],
@@ -200,15 +203,15 @@ mod tests {
             algorithm: Algorithm::RoundRobin,
             health_check: HealthCheckConfig {
                 path: String::from("/health"),
-                interval_secs: 10,
-                timeout_secs: 5,
+                interval: 10,
+                timeout: 5,
                 health_threshold: 3,
                 unhealthy_threshold: 3,
             },
             timeouts: TimeoutConfig {
-                connect_timeout_secs: 5,
-                read_timeout_secs: 30,
-                write_timeout_secs: 30,
+                connect: 5,
+                read: 30,
+                write: 30,
             },
             max_connections: 1000,
         };
@@ -283,10 +286,10 @@ mod tests {
 
     #[test]
     fn test_reject_missing_fields() {
-        let config_str = r#"
+        let config_str = r"
             [[backends]]
             weight = 1
-        "#;
+        ";
 
         let parsed = toml::from_str::<Config>(config_str);
 
