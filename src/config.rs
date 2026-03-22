@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 
 // --- Error types ---
-#[derive(thiserror::Error, Debug, PartialEq)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq)]
 pub enum ConfigValidationError {
     #[error("configuration must have at least one backend")]
     ZeroBackends,
@@ -16,7 +16,7 @@ pub enum ConfigValidationError {
 
 // --- Supporting types ---
 
-#[derive(Deserialize, PartialEq, Debug, Default)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Algorithm {
     #[default]
@@ -27,7 +27,7 @@ pub enum Algorithm {
     Random,
 }
 
-#[derive(Deserialize, PartialEq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub struct BackendConfig {
     pub addr: String,
@@ -35,55 +35,58 @@ pub struct BackendConfig {
     pub weight: u32,
 }
 
-fn default_weight() -> u32 {
+const fn default_weight() -> u32 {
     1
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 #[serde(default)]
 pub struct HealthCheckConfig {
     path: String,
-    interval_secs: u64,
-    timeout_secs: u64,
+    /// Interval between health checks in seconds
+    interval: u64,
+    /// Timeout for each health check request in seconds
+    timeout: u64,
     health_threshold: u32,
     unhealthy_threshold: u32,
 }
 
 impl Default for HealthCheckConfig {
     fn default() -> Self {
-        HealthCheckConfig {
+        Self {
             path: String::from("/health"),
-            interval_secs: 5,
-            timeout_secs: 3,
+            interval: 5,
+            timeout: 3,
             health_threshold: 3,
             unhealthy_threshold: 3,
         }
     }
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 #[serde(default)]
+/// Timeouts for backend connections in seconds
 pub struct TimeoutConfig {
-    connect_timeout_secs: u64,
-    read_timeout_secs: u64,
-    write_timeout_secs: u64,
+    connect: u64,
+    read: u64,
+    write: u64,
 }
 
 impl Default for TimeoutConfig {
     fn default() -> Self {
-        TimeoutConfig {
-            connect_timeout_secs: 5,
-            read_timeout_secs: 30,
-            write_timeout_secs: 30,
+        Self {
+            connect: 5,
+            read: 30,
+            write: 30,
         }
     }
 }
 
 // --- Primary type ---
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 #[serde(default)]
 pub struct Config {
@@ -126,7 +129,7 @@ impl Config {
 
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
         let contents = std::fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&contents)?;
+        let config: Self = toml::from_str(&contents)?;
         config.validate()?;
         Ok(config)
     }
@@ -134,7 +137,7 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Config {
+        Self {
             listen_addr: String::from("0.0.0.0:8080"),
             admin_addr: String::from("0.0.0.0:9090"),
             backends: vec![],
@@ -171,15 +174,15 @@ mod tests {
 
             [health_check]
             path = "/health"
-            interval_secs = 10
-            timeout_secs = 5
+            interval = 10
+            timeout = 5
             health_threshold = 3
             unhealthy_threshold = 3
 
             [timeouts]
-            connect_timeout_secs = 5
-            read_timeout_secs = 30
-            write_timeout_secs = 30
+            connect = 5
+            read = 30
+            write = 30
         "#;
 
         let config = toml::from_str::<Config>(config_str);
@@ -200,20 +203,20 @@ mod tests {
             algorithm: Algorithm::RoundRobin,
             health_check: HealthCheckConfig {
                 path: String::from("/health"),
-                interval_secs: 10,
-                timeout_secs: 5,
+                interval: 10,
+                timeout: 5,
                 health_threshold: 3,
                 unhealthy_threshold: 3,
             },
             timeouts: TimeoutConfig {
-                connect_timeout_secs: 5,
-                read_timeout_secs: 30,
-                write_timeout_secs: 30,
+                connect: 5,
+                read: 30,
+                write: 30,
             },
             max_connections: 1000,
         };
 
-        assert_eq!(config.unwrap(), expected);
+        assert_eq!(config.expect("failed to read config"), expected);
     }
 
     #[test]
@@ -223,7 +226,7 @@ mod tests {
             addr = "127.0.0.1:3000"
         "#;
 
-        let config = toml::from_str::<Config>(config_str).unwrap();
+        let config = toml::from_str::<Config>(config_str).expect("failed to read config");
 
         let expected = Config {
             backends: vec![BackendConfig {
@@ -240,9 +243,9 @@ mod tests {
     fn test_reject_zero_backends() {
         let config_str = "";
 
-        let parsed = toml::from_str::<Config>(config_str).unwrap();
+        let config = toml::from_str::<Config>(config_str).expect("failed to read config");
 
-        let result = parsed.validate();
+        let result = config.validate();
 
         assert_eq!(result.err(), Some(ConfigValidationError::ZeroBackends));
     }
@@ -257,9 +260,9 @@ mod tests {
             addr = "0.0.0.0:3000"
         "#;
 
-        let parsed = toml::from_str::<Config>(config_str).unwrap();
+        let config = toml::from_str::<Config>(config_str).expect("failed to read config");
 
-        let result = parsed.validate();
+        let result = config.validate();
 
         assert_eq!(
             result.err(),
@@ -274,23 +277,23 @@ mod tests {
             addr = "invalid_addr"
         "#;
 
-        let parsed = toml::from_str::<Config>(config_str).unwrap();
+        let config = toml::from_str::<Config>(config_str).expect("failed to read config");
 
-        let result = parsed.validate();
+        let result = config.validate();
 
         assert_eq!(result.err(), Some(ConfigValidationError::InvalidAddrs));
     }
 
     #[test]
     fn test_reject_missing_fields() {
-        let config_str = r#"
+        let config_str = r"
             [[backends]]
             weight = 1
-        "#;
+        ";
 
-        let parsed = toml::from_str::<Config>(config_str);
+        let config = toml::from_str::<Config>(config_str);
 
-        assert!(parsed.is_err());
+        assert!(config.is_err());
     }
 
     #[test]
@@ -313,15 +316,15 @@ mod tests {
             "#
             );
 
-            let parsed = toml::from_str::<Config>(&config_str).unwrap();
+            let config = toml::from_str::<Config>(&config_str).expect("failed to read config");
 
-            assert_eq!(parsed.algorithm, expected_alg);
+            assert_eq!(config.algorithm, expected_alg);
         }
     }
 
     #[test]
     fn test_read_config_from_file() {
-        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let config_path = temp_dir.path().join("config.toml");
 
         let config_str = r#"
@@ -329,9 +332,9 @@ mod tests {
             addr = "0.0.0.0:3000"
         "#;
 
-        let mut file = std::fs::File::create(&config_path).unwrap();
+        let mut file = std::fs::File::create(&config_path).expect("failed to create config file");
         let _ = std::io::Write::write_all(&mut file, config_str.as_bytes());
-        let config = Config::from_file(&config_path).unwrap();
+        let config = Config::from_file(&config_path).expect("failed to read config from file");
 
         let expected = Config {
             backends: vec![BackendConfig {
