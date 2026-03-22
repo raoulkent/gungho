@@ -174,15 +174,15 @@ mod tests {
 
             [health_check]
             path = "/health"
-            interval_secs = 10
-            timeout_secs = 5
+            interval = 10
+            timeout = 5
             health_threshold = 3
             unhealthy_threshold = 3
 
             [timeouts]
-            connect_timeout_secs = 5
-            read_timeout_secs = 30
-            write_timeout_secs = 30
+            connect = 5
+            read = 30
+            write = 30
         "#;
 
         let config = toml::from_str::<Config>(config_str);
