@@ -216,7 +216,7 @@ mod tests {
             max_connections: 1000,
         };
 
-        assert_eq!(config.unwrap(), expected);
+        assert_eq!(config.expect("failed to read config"), expected);
     }
 
     #[test]
@@ -226,7 +226,7 @@ mod tests {
             addr = "127.0.0.1:3000"
         "#;
 
-        let config = toml::from_str::<Config>(config_str).unwrap();
+        let config = toml::from_str::<Config>(config_str).expect("failed to read config");
 
         let expected = Config {
             backends: vec![BackendConfig {
@@ -243,9 +243,9 @@ mod tests {
     fn test_reject_zero_backends() {
         let config_str = "";
 
-        let parsed = toml::from_str::<Config>(config_str).unwrap();
+        let config = toml::from_str::<Config>(config_str).expect("failed to read config");
 
-        let result = parsed.validate();
+        let result = config.validate();
 
         assert_eq!(result.err(), Some(ConfigValidationError::ZeroBackends));
     }
@@ -260,9 +260,9 @@ mod tests {
             addr = "0.0.0.0:3000"
         "#;
 
-        let parsed = toml::from_str::<Config>(config_str).unwrap();
+        let config = toml::from_str::<Config>(config_str).expect("failed to read config");
 
-        let result = parsed.validate();
+        let result = config.validate();
 
         assert_eq!(
             result.err(),
@@ -277,9 +277,9 @@ mod tests {
             addr = "invalid_addr"
         "#;
 
-        let parsed = toml::from_str::<Config>(config_str).unwrap();
+        let config = toml::from_str::<Config>(config_str).expect("failed to read config");
 
-        let result = parsed.validate();
+        let result = config.validate();
 
         assert_eq!(result.err(), Some(ConfigValidationError::InvalidAddrs));
     }
@@ -291,9 +291,9 @@ mod tests {
             weight = 1
         ";
 
-        let parsed = toml::from_str::<Config>(config_str);
+        let config = toml::from_str::<Config>(config_str);
 
-        assert!(parsed.is_err());
+        assert!(config.is_err());
     }
 
     #[test]
@@ -316,15 +316,15 @@ mod tests {
             "#
             );
 
-            let parsed = toml::from_str::<Config>(&config_str).unwrap();
+            let config = toml::from_str::<Config>(&config_str).expect("failed to read config");
 
-            assert_eq!(parsed.algorithm, expected_alg);
+            assert_eq!(config.algorithm, expected_alg);
         }
     }
 
     #[test]
     fn test_read_config_from_file() {
-        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let config_path = temp_dir.path().join("config.toml");
 
         let config_str = r#"
@@ -332,9 +332,9 @@ mod tests {
             addr = "0.0.0.0:3000"
         "#;
 
-        let mut file = std::fs::File::create(&config_path).unwrap();
+        let mut file = std::fs::File::create(&config_path).expect("failed to create config file");
         let _ = std::io::Write::write_all(&mut file, config_str.as_bytes());
-        let config = Config::from_file(&config_path).unwrap();
+        let config = Config::from_file(&config_path).expect("failed to read config from file");
 
         let expected = Config {
             backends: vec![BackendConfig {
