@@ -25,5 +25,8 @@ target
 
 /target
 
+# bacon-ls
+.bacon-locations
+
 # Sisyphus
 .sisyphus
