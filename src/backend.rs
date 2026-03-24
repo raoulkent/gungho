@@ -13,7 +13,7 @@ struct Backend {
 
 impl Backend {
     pub fn from_config(config: &BackendConfig) -> Result<Self, AddrParseError> {
-        Ok(Backend {
+        Ok(Self {
             addr: config.addr.parse::<std::net::SocketAddr>()?,
             weight: config.weight,
             healthy: AtomicBool::new(true),
@@ -35,8 +35,8 @@ pub enum BackendPoolError {
 }
 
 impl BackendPoolError {
-    pub fn from_addr_parse_error(err: AddrParseError) -> Self {
-        BackendPoolError::AddrParseError(err)
+    pub const fn from_addr_parse_error(err: AddrParseError) -> Self {
+        Self::AddrParseError(err)
     }
 }
 
@@ -52,7 +52,7 @@ impl BackendPool {
             .map(Backend::from_config)
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(BackendPool {
+        Ok(Self {
             backends: backends.into_iter().map(Arc::new).collect(),
         })
     }
@@ -89,12 +89,14 @@ mod tests {
             ..Config::default()
         };
 
-        let pool = BackendPool::from_config(&config).unwrap();
+        let pool = BackendPool::from_config(&config).expect("BackendPool ");
 
         assert_eq!(pool.backends.len(), 2);
         assert_eq!(
             pool.backends[0].addr,
-            "0.0.0.0:8080".parse::<SocketAddr>().unwrap()
+            "0.0.0.0:8080"
+                .parse::<SocketAddr>()
+                .expect("Could not parse address")
         );
     }
 
@@ -116,7 +118,8 @@ mod tests {
             ..Config::default()
         };
 
-        let pool = BackendPool::from_config(&config).unwrap();
+        let pool =
+            BackendPool::from_config(&config).expect("could not read backendpool from config");
 
         assert_eq!(pool.healthy_backends().len(), 2);
     }
@@ -139,7 +142,8 @@ mod tests {
             ..Config::default()
         };
 
-        let pool = BackendPool::from_config(&config).unwrap();
+        let pool =
+            BackendPool::from_config(&config).expect("Could not read backendpool from config");
 
         pool.backends[0].healthy.store(false, Ordering::SeqCst);
 
