@@ -26,7 +26,7 @@ struct BackendPool {
     backends: Vec<Arc<Backend>>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Eq, PartialEq)]
 pub enum BackendPoolError {
     #[error("No backends configured")]
     NoBackends,
@@ -151,11 +151,38 @@ mod tests {
     }
 
     #[test]
-    fn test_mark_healthy_recovery() {}
+    fn test_mark_healthy_recovery() {
+        let backends = [
+            BackendConfig {
+                addr: "0.0.0.0:8080".to_string(),
+                weight: 1,
+            },
+            BackendConfig {
+                addr: "0.0.0.1:8080".to_string(),
+                weight: 2,
+            },
+        ];
+
+        let config = Config {
+            backends: backends.to_vec(),
+            ..Config::default()
+        };
+
+        let pool =
+            BackendPool::from_config(&config).expect("Could not read backendpool from config");
+
+        pool.backends[0].healthy.store(false, Ordering::SeqCst);
+    }
 
     #[test]
     fn test_connection_counting() {}
 
     #[test]
-    fn test_empty_config_errors() {}
+    fn test_empty_config_errors() {
+        let config = Config::default();
+
+        let pool = BackendPool::from_config(&config);
+
+        assert_eq!(pool.err(), Some(BackendPoolError::NoBackends));
+    }
 }
