@@ -64,6 +64,14 @@ impl BackendPool {
             .cloned()
             .collect()
     }
+
+    fn mark_healthy(&self, index: usize) {
+        self.backends[index].healthy.store(true, Ordering::SeqCst);
+    }
+
+    fn mark_unhealthy(&self, index: usize) {
+        self.backends[index].healthy.store(false, Ordering::SeqCst);
+    }
 }
 
 #[cfg(test)]
