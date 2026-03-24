@@ -65,12 +65,22 @@ impl BackendPool {
             .collect()
     }
 
-    fn mark_healthy(&self, index: usize) {
-        self.backends[index].healthy.store(true, Ordering::SeqCst);
+    fn mark_healthy(&self, index: usize) -> Option<()> {
+        self.backends
+            .get(index)?
+            .healthy
+            .store(true, Ordering::SeqCst);
+
+        Some(())
     }
 
-    fn mark_unhealthy(&self, index: usize) {
-        self.backends[index].healthy.store(false, Ordering::SeqCst);
+    fn mark_unhealthy(&self, index: usize) -> Option<()> {
+        self.backends
+            .get(index)?
+            .healthy
+            .store(false, Ordering::SeqCst);
+
+        Some(())
     }
 }
 
