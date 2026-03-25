@@ -163,7 +163,7 @@ mod tests {
         let pool =
             BackendPool::from_config(&config).expect("Could not read backendpool from config");
 
-        pool.backends[0].healthy.store(false, Ordering::SeqCst);
+        pool.mark_unhealthy(0);
 
         assert_eq!(pool.healthy_backends().len(), 1);
     }
@@ -189,7 +189,13 @@ mod tests {
         let pool =
             BackendPool::from_config(&config).expect("Could not read backendpool from config");
 
-        pool.backends[0].healthy.store(false, Ordering::SeqCst);
+        pool.mark_unhealthy(1);
+
+        assert_eq!(pool.backends[1].healthy.load(Ordering::SeqCst), false);
+
+        pool.mark_healthy(1);
+
+        assert_eq!(pool.backends[1].healthy.load(Ordering::SeqCst), true);
     }
 
     #[test]
