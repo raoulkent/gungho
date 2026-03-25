@@ -1,8 +1,8 @@
 use crate::config::{BackendConfig, Config};
 use std::net::{AddrParseError, SocketAddr};
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::Arc;
 
 struct Backend {
     addr: SocketAddr,
@@ -41,12 +41,6 @@ pub enum BackendPoolError {
     #[error("Invalid backend address: {0}")]
     AddrParseError(#[from] AddrParseError),
 }
-
-// impl BackendPoolError {
-//     pub const fn from_addr_parse_error(err: AddrParseError) -> Self {
-//         Self::AddrParseError(err)
-//     }
-// }
 
 impl BackendPool {
     pub fn from_config(config: &Config) -> Result<Self, BackendPoolError> {
@@ -106,8 +100,6 @@ impl BackendPool {
 
 #[cfg(test)]
 mod tests {
-    use crate::config;
-
     use super::*;
     use pretty_assertions::assert_eq;
 
