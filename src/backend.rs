@@ -20,6 +20,14 @@ impl Backend {
             active_connections: AtomicUsize::new(0),
         })
     }
+
+    pub fn increment_connections(&self) {
+        self.active_connections.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub fn decrement_connections(&self) {
+        self.active_connections.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 struct BackendPool {
@@ -34,11 +42,11 @@ pub enum BackendPoolError {
     AddrParseError(#[from] AddrParseError),
 }
 
-impl BackendPoolError {
-    pub const fn from_addr_parse_error(err: AddrParseError) -> Self {
-        Self::AddrParseError(err)
-    }
-}
+// impl BackendPoolError {
+//     pub const fn from_addr_parse_error(err: AddrParseError) -> Self {
+//         Self::AddrParseError(err)
+//     }
+// }
 
 impl BackendPool {
     pub fn from_config(config: &Config) -> Result<Self, BackendPoolError> {
@@ -82,10 +90,24 @@ impl BackendPool {
 
         Some(())
     }
+
+    fn increment_connections(&self, index: usize) -> Option<()> {
+        self.backends.get(index)?.increment_connections();
+
+        Some(())
+    }
+
+    fn decrement_connections(&self, index: usize) -> Option<()> {
+        self.backends.get(index)?.decrement_connections();
+
+        Some(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::config;
+
     use super::*;
     use pretty_assertions::assert_eq;
 
@@ -199,7 +221,52 @@ mod tests {
     }
 
     #[test]
-    fn test_connection_counting() {}
+    fn test_connection_counting() {
+        let backends = [
+            BackendConfig {
+                addr: "0.0.0.0:8080".to_string(),
+                weight: 1,
+            },
+            BackendConfig {
+                addr: "0.0.0.1:8080".to_string(),
+                weight: 2,
+            },
+        ];
+
+        let config = Config {
+            backends: backends.to_vec(),
+            ..Config::default()
+        };
+
+        let pool = BackendPool::from_config(&config).expect("BackendPool ");
+
+        assert_eq!(
+            pool.backends[0].active_connections.load(Ordering::SeqCst),
+            0
+        );
+        assert_eq!(
+            pool.backends[1].active_connections.load(Ordering::SeqCst),
+            0,
+        );
+
+        for _ in 1..=13 {
+            pool.increment_connections(1);
+        }
+
+        assert_eq!(
+            pool.backends[1].active_connections.load(Ordering::SeqCst),
+            13
+        );
+
+        for _ in 1..=7 {
+            pool.decrement_connections(1);
+        }
+
+        assert_eq!(
+            pool.backends[1].active_connections.load(Ordering::SeqCst),
+            6
+        );
+    }
 
     #[test]
     fn test_empty_config_errors() {
