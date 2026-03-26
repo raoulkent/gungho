@@ -1,8 +1,8 @@
-use crate::config::{BackendConfig, Config};
+use crate::config::BackendConfig;
 use std::net::{AddrParseError, SocketAddr};
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
-use std::sync::Arc;
 
 struct Backend {
     addr: SocketAddr,
@@ -43,13 +43,12 @@ pub enum BackendPoolError {
 }
 
 impl BackendPool {
-    pub fn from_config(config: &Config) -> Result<Self, BackendPoolError> {
-        if config.backends.is_empty() {
+    pub fn from_config(backends: &[BackendConfig]) -> Result<Self, BackendPoolError> {
+        if backends.is_empty() {
             return Err(BackendPoolError::NoBackends);
         }
 
-        let backends = config
-            .backends
+        let backends = backends
             .iter()
             .map(Backend::from_config)
             .collect::<Result<Vec<_>, _>>()?;
@@ -57,6 +56,10 @@ impl BackendPool {
         Ok(Self {
             backends: backends.into_iter().map(Arc::new).collect(),
         })
+    }
+
+    fn all_backends(&self) -> &[Arc<Backend>] {
+        &self.backends
     }
 
     fn healthy_backends(&self) -> Vec<Arc<Backend>> {
@@ -116,12 +119,7 @@ mod tests {
             },
         ];
 
-        let config = Config {
-            backends: backends.to_vec(),
-            ..Config::default()
-        };
-
-        let pool = BackendPool::from_config(&config).expect("BackendPool ");
+        let pool = BackendPool::from_config(&backends).expect("BackendPool ");
 
         assert_eq!(pool.backends.len(), 2);
         assert_eq!(
@@ -145,13 +143,8 @@ mod tests {
             },
         ];
 
-        let config = Config {
-            backends: backends.to_vec(),
-            ..Config::default()
-        };
-
         let pool =
-            BackendPool::from_config(&config).expect("could not read backendpool from config");
+            BackendPool::from_config(&backends).expect("could not read backendpool from config");
 
         assert_eq!(pool.healthy_backends().len(), 2);
     }
@@ -169,13 +162,8 @@ mod tests {
             },
         ];
 
-        let config = Config {
-            backends: backends.to_vec(),
-            ..Config::default()
-        };
-
         let pool =
-            BackendPool::from_config(&config).expect("Could not read backendpool from config");
+            BackendPool::from_config(&backends).expect("Could not read backendpool from config");
 
         pool.mark_unhealthy(0);
 
@@ -195,13 +183,8 @@ mod tests {
             },
         ];
 
-        let config = Config {
-            backends: backends.to_vec(),
-            ..Config::default()
-        };
-
         let pool =
-            BackendPool::from_config(&config).expect("Could not read backendpool from config");
+            BackendPool::from_config(&backends).expect("Could not read backendpool from config");
 
         pool.mark_unhealthy(1);
 
@@ -225,12 +208,7 @@ mod tests {
             },
         ];
 
-        let config = Config {
-            backends: backends.to_vec(),
-            ..Config::default()
-        };
-
-        let pool = BackendPool::from_config(&config).expect("BackendPool ");
+        let pool = BackendPool::from_config(&backends).expect("BackendPool ");
 
         assert_eq!(
             pool.backends[0].active_connections.load(Ordering::SeqCst),
@@ -262,9 +240,9 @@ mod tests {
 
     #[test]
     fn test_empty_config_errors() {
-        let config = Config::default();
+        let backends: &[BackendConfig] = &[];
 
-        let pool = BackendPool::from_config(&config);
+        let pool = BackendPool::from_config(backends);
 
         assert_eq!(pool.err(), Some(BackendPoolError::NoBackends));
     }
