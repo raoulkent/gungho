@@ -58,11 +58,11 @@ impl BackendPool {
         })
     }
 
-    fn all_backends(&self) -> &[Arc<Backend>] {
+    pub fn all_backends(&self) -> &[Arc<Backend>] {
         &self.backends
     }
 
-    fn healthy_backends(&self) -> Vec<Arc<Backend>> {
+    pub fn healthy_backends(&self) -> Vec<Arc<Backend>> {
         self.backends
             .iter()
             .filter(|b| b.healthy.load(Ordering::SeqCst))
