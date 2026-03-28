@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 
-struct Backend {
+pub struct Backend {
     addr: SocketAddr,
     weight: u32,
     healthy: AtomicBool,
@@ -30,7 +30,7 @@ impl Backend {
     }
 }
 
-struct BackendPool {
+pub struct BackendPool {
     backends: Vec<Arc<Backend>>,
 }
 
