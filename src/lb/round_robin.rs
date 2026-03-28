@@ -1,10 +1,11 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use crate::backend::Backend;
 use crate::lb::LoadBalancingStrategy;
 
+#[derive(Debug)]
 pub struct RoundRobin {
     counter: AtomicUsize,
 }
@@ -28,6 +29,10 @@ impl LoadBalancingStrategy for RoundRobin {
         }
         let index = self.counter.fetch_add(1, Ordering::SeqCst) % backends.len();
         Some(index)
+    }
+
+    fn algorithm(&self) -> &crate::config::Algorithm {
+        &crate::config::Algorithm::RoundRobin
     }
 }
 
