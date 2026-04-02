@@ -21,6 +21,26 @@ impl Backend {
         })
     }
 
+    pub const fn get_addr(&self) -> SocketAddr {
+        self.addr
+    }
+
+    pub const fn get_weight(&self) -> u32 {
+        self.weight
+    }
+
+    pub const fn set_weight(&mut self, weight: u32) {
+        self.weight = weight;
+    }
+
+    pub fn get_health(&self) -> bool {
+        self.healthy.load(Ordering::SeqCst)
+    }
+
+    pub fn get_active_connections(&self) -> usize {
+        self.active_connections.load(Ordering::SeqCst)
+    }
+
     pub fn increment_connections(&self) {
         self.active_connections.fetch_add(1, Ordering::SeqCst);
     }
