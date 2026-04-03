@@ -93,15 +93,24 @@ mod tests {
 
     #[test]
     fn test_selects_lowest_connections() {
-        let backends = three_backends();
-        let pool = setup_pool(&backends);
-        let strategy = super::LeastConnections::new();
+        let pool = setup_pool(&three_backends());
+        let strategy = LeastConnections::new();
+        let backends = pool.all_backends();
 
-        backends.iter().enumerate().for_each(|(i, _)| {
-            for _ in 0..(i + 1) {
-                pool.healthy_backends()[i].increment_connections();
-            }
-        });
+        for _ in 0..5 {
+            backends[0].increment_connections();
+        } // 5 conns
+        for _ in 0..2 {
+            backends[1].increment_connections();
+        } // 2 conns
+        for _ in 0..8 {
+            backends[2].increment_connections();
+        } // 8 conns
+
+        let selected = strategy.select(backends, None);
+
+        // Picks index 1 (lowest at 2)
+        assert_eq!(selected, Some(1));
     }
 
     #[test]
