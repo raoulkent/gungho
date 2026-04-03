@@ -114,10 +114,38 @@ mod tests {
     }
 
     #[test]
-    fn test_tie_picks_first() {}
+    fn test_tie_picks_first() {
+        let pool = setup_pool(&three_backends());
+        let strategy = LeastConnections::new();
+        let backends = pool.all_backends();
+
+        for _ in 0..3 {
+            backends[0].increment_connections();
+        } // 3 conns
+        for _ in 0..3 {
+            backends[1].increment_connections();
+        } // 3 conns
+        for _ in 0..3 {
+            backends[2].increment_connections();
+        } // 3 conns
+
+        let selected = strategy.select(backends, None);
+
+        // Picks index 0, when there is a tie
+        assert_eq!(selected, Some(0));
+    }
 
     #[test]
-    fn test_all_zero() {}
+    fn test_all_zero() {
+        let pool = setup_pool(&three_backends());
+        let strategy = LeastConnections::new();
+        let backends = pool.all_backends();
+
+        let selected = strategy.select(backends, None);
+
+        // Picks index 0, when all backends have zero connections
+        assert_eq!(selected, Some(0));
+    }
 
     #[test]
     fn test_empty_returns_none() {
