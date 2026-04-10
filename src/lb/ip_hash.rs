@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::backend::Backend;
 use crate::lb::LoadBalancingStrategy;
 
+#[derive(Debug)]
 pub struct IpHash;
 
 impl IpHash {
@@ -43,7 +44,6 @@ mod tests {
     use super::*;
     use crate::backend::BackendPool;
     use crate::config::BackendConfig;
-    use crate::lb::LoadBalancingStrategy;
 
     fn setup_pool(configs: &[BackendConfig]) -> BackendPool {
         BackendPool::from_config(configs).expect("Failed to create BackendPool")
@@ -69,7 +69,7 @@ mod tests {
     #[test]
     fn test_deterministic_ipv4() {
         let pool = setup_pool(&three_backends());
-        let strategy = super::IpHash::new();
+        let strategy = IpHash::new();
         let addr: SocketAddr = "192.168.1.1:1234"
             .parse()
             .expect("Failed to parse SocketAddr");
@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn test_deterministic_ipv6() {
         let pool = setup_pool(&three_backends());
-        let strategy = super::IpHash::new();
+        let strategy = IpHash::new();
         let addr: SocketAddr = "[2001:db8::1428:7ab]:1234"
             .parse()
             .expect("Failed to parse SocketAddr");
@@ -109,8 +109,7 @@ mod tests {
         use std::collections::HashSet;
 
         let pool = setup_pool(&three_backends());
-        let strategy = super::IpHash::new();
-
+        let strategy = IpHash::new();
         let ips: Vec<SocketAddr> = (1..=100)
             .map(|i| {
                 format!("11.0.0.{i}:5678")
@@ -127,6 +126,7 @@ mod tests {
                     .expect("Failed to select backend")
             })
             .collect();
+
         assert!(
             unique_indices.len() > 1,
             "all IPs mapped to the same backend"
@@ -136,14 +136,16 @@ mod tests {
     #[test]
     fn test_none_addr_returns_zero() {
         let pool = setup_pool(&three_backends());
-        let strategy = super::IpHash::new();
+        let strategy = IpHash::new();
+
         assert_eq!(strategy.select(&pool.healthy_backends(), None), Some(0));
     }
 
     #[test]
-    fn empty_returns_none() {
-        let strategy = super::IpHash::new();
+    fn test_empty_returns_none() {
+        let strategy = IpHash::new();
         let empty: Vec<Arc<Backend>> = Vec::new();
+
         assert_eq!(strategy.select(&empty, None), None);
     }
 }

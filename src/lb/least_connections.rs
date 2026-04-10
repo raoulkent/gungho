@@ -45,7 +45,6 @@ mod tests {
     use super::*;
     use crate::backend::BackendPool;
     use crate::config::BackendConfig;
-    use crate::lb::LoadBalancingStrategy;
 
     fn setup_pool(configs: &[BackendConfig]) -> BackendPool {
         BackendPool::from_config(configs).expect("Failed to create BackendPool")
@@ -68,16 +67,10 @@ mod tests {
         ]
     }
 
-    // - test_selects_lowest_connections — [5, 2, 8] → index 1
-    // - test_tie_picks_first — [3, 3, 3] → index 0
-    // - test_all_zero — [0, 0, 0] → index 0
-    // - test_empty_returns_none — [] → None
-
     #[test]
-    fn test_least_connections() {
-        let backends = three_backends();
-        let pool = setup_pool(&backends);
-        let strategy = super::LeastConnections::new();
+    fn test_distributes_evenly() {
+        let pool = setup_pool(&three_backends());
+        let strategy = LeastConnections::new();
 
         for _ in 0..10 {
             let index = strategy
@@ -96,20 +89,18 @@ mod tests {
         let pool = setup_pool(&three_backends());
         let strategy = LeastConnections::new();
         let backends = pool.all_backends();
-
         for _ in 0..5 {
             backends[0].increment_connections();
-        } // 5 conns
+        }
         for _ in 0..2 {
             backends[1].increment_connections();
-        } // 2 conns
+        }
         for _ in 0..8 {
             backends[2].increment_connections();
-        } // 8 conns
+        }
 
         let selected = strategy.select(backends, None);
 
-        // Picks index 1 (lowest at 2)
         assert_eq!(selected, Some(1));
     }
 
@@ -118,20 +109,18 @@ mod tests {
         let pool = setup_pool(&three_backends());
         let strategy = LeastConnections::new();
         let backends = pool.all_backends();
-
         for _ in 0..3 {
             backends[0].increment_connections();
-        } // 3 conns
+        }
         for _ in 0..3 {
             backends[1].increment_connections();
-        } // 3 conns
+        }
         for _ in 0..3 {
             backends[2].increment_connections();
-        } // 3 conns
+        }
 
         let selected = strategy.select(backends, None);
 
-        // Picks index 0, when there is a tie
         assert_eq!(selected, Some(0));
     }
 
@@ -143,14 +132,14 @@ mod tests {
 
         let selected = strategy.select(backends, None);
 
-        // Picks index 0, when all backends have zero connections
         assert_eq!(selected, Some(0));
     }
 
     #[test]
     fn test_empty_returns_none() {
-        let strategy = super::LeastConnections::new();
+        let strategy = LeastConnections::new();
         let empty: Vec<Arc<Backend>> = Vec::new();
+
         assert_eq!(strategy.select(&empty, None), None);
     }
 }

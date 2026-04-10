@@ -80,14 +80,34 @@ impl LoadBalancingStrategy for WeightedRoundRobin {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::backend::BackendPool;
     use crate::config::BackendConfig;
-    use crate::lb::LoadBalancingStrategy;
+
+    fn setup_pool(configs: &[BackendConfig]) -> BackendPool {
+        BackendPool::from_config(configs).expect("Failed to create BackendPool")
+    }
+
+    fn three_backends() -> Vec<BackendConfig> {
+        vec![
+            BackendConfig {
+                addr: "0.0.0.0:8080".into(),
+                weight: 1,
+            },
+            BackendConfig {
+                addr: "0.0.0.1:8080".into(),
+                weight: 1,
+            },
+            BackendConfig {
+                addr: "0.0.0.2:8080".into(),
+                weight: 1,
+            },
+        ]
+    }
 
     #[test]
     fn test_weighted_distribution() {
-        let strategy = super::WeightedRoundRobin::new();
-
-        let backends = [
+        let pool = setup_pool(&[
             BackendConfig {
                 addr: "0.0.0.0:8080".into(),
                 weight: 5,
@@ -100,10 +120,8 @@ mod tests {
                 addr: "0.0.0.2:8080".into(),
                 weight: 1,
             },
-        ];
-
-        let pool = crate::backend::BackendPool::from_config(&backends)
-            .expect("Failed to create BackendPool");
+        ]);
+        let strategy = WeightedRoundRobin::new();
 
         let mut counts = [0u32; 3];
         for _ in 0..700 {
@@ -113,34 +131,15 @@ mod tests {
             counts[idx] += 1;
         }
 
-        // weights [5, 1, 1] → total 7
-        // backend 0: 500 (71.4%), backend 1: 100 (14.3%), backend 2: 100 (14.3%)
         assert_eq!(counts[0], 500);
         assert_eq!(counts[1], 100);
         assert_eq!(counts[2], 100);
     }
 
     #[test]
-    fn test_weighted_equal_weights() {
-        let strategy = super::WeightedRoundRobin::new();
-
-        let backends = [
-            BackendConfig {
-                addr: "0.0.0.0:8080".into(),
-                weight: 1,
-            },
-            BackendConfig {
-                addr: "0.0.0.1:8080".into(),
-                weight: 1,
-            },
-            BackendConfig {
-                addr: "0.0.0.2:8080".into(),
-                weight: 1,
-            },
-        ];
-
-        let pool = crate::backend::BackendPool::from_config(&backends)
-            .expect("Failed to create BackendPool");
+    fn test_equal_weights() {
+        let pool = setup_pool(&three_backends());
+        let strategy = WeightedRoundRobin::new();
 
         let mut counts = [0u32; 3];
         for _ in 0..300 {
@@ -150,24 +149,18 @@ mod tests {
             counts[idx] += 1;
         }
 
-        // weights [1, 1, 1] → total 3
-        // backend 0: 100 (33.3%), backend 1: 100 (33.3%), backend 2: 100 ()
         assert_eq!(counts[0], 100);
         assert_eq!(counts[1], 100);
         assert_eq!(counts[2], 100);
     }
 
     #[test]
-    fn test_weighted_single_backend() {
-        let strategy = super::WeightedRoundRobin::new();
-
-        let backends = [BackendConfig {
+    fn test_single_backend() {
+        let pool = setup_pool(&[BackendConfig {
             addr: "0.0.0.0:8080".into(),
             weight: 1,
-        }];
-
-        let pool = crate::backend::BackendPool::from_config(&backends)
-            .expect("Failed to create BackendPool");
+        }]);
+        let strategy = WeightedRoundRobin::new();
 
         let mut counts = [0u32; 1];
         for _ in 0..100 {
@@ -178,5 +171,13 @@ mod tests {
         }
 
         assert_eq!(counts[0], 100);
+    }
+
+    #[test]
+    fn test_empty_returns_none() {
+        let strategy = WeightedRoundRobin::new();
+        let empty: Vec<Arc<Backend>> = Vec::new();
+
+        assert_eq!(strategy.select(&empty, None), None);
     }
 }
