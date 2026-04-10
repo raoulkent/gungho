@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::backend::Backend;
 use crate::config::Algorithm;
 
+mod ip_hash;
 mod least_connections;
 mod round_robin;
 mod weighted_round_robin;
@@ -18,7 +19,8 @@ pub fn create_strategy(algorithm: &Algorithm) -> Box<dyn LoadBalancingStrategy> 
         Algorithm::RoundRobin => Box::new(round_robin::RoundRobin::new()),
         Algorithm::WeightedRoundRobin => Box::new(weighted_round_robin::WeightedRoundRobin::new()),
         Algorithm::LeastConnections => Box::new(least_connections::LeastConnections::new()),
-        _ => todo!(),
+        Algorithm::IpHash => Box::new(ip_hash::IpHash::new()),
+        Algorithm::Random => todo!(),
     }
 }
 
