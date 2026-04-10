@@ -20,7 +20,7 @@ pub fn create_strategy(algorithm: &Algorithm) -> Box<dyn LoadBalancingStrategy> 
         Algorithm::WeightedRoundRobin => Box::new(weighted_round_robin::WeightedRoundRobin::new()),
         Algorithm::LeastConnections => Box::new(least_connections::LeastConnections::new()),
         Algorithm::IpHash => Box::new(ip_hash::IpHash::new()),
-        _ => todo!(),
+        Algorithm::Random => todo!(),
     }
 }
 
