@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use crate::backend::Backend;
 use crate::lb::LoadBalancingStrategy;
@@ -38,62 +38,51 @@ impl LoadBalancingStrategy for RoundRobin {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use crate::backend::{Backend, BackendPool};
+    use super::*;
+    use crate::backend::BackendPool;
     use crate::config::BackendConfig;
-    use crate::lb::LoadBalancingStrategy;
 
-    #[test]
-    fn test_round_robin_even_distribution() {
-        let backends = [
+    fn setup_pool(configs: &[BackendConfig]) -> BackendPool {
+        BackendPool::from_config(configs).expect("Failed to create BackendPool")
+    }
+
+    fn three_backends() -> Vec<BackendConfig> {
+        vec![
             BackendConfig {
                 addr: "0.0.0.0:8080".into(),
                 weight: 1,
             },
             BackendConfig {
                 addr: "0.0.0.1:8080".into(),
-                weight: 2,
+                weight: 1,
             },
             BackendConfig {
                 addr: "0.0.0.2:8080".into(),
-                weight: 3,
+                weight: 1,
             },
-        ];
+        ]
+    }
 
-        let pool = BackendPool::from_config(&backends).expect("BackendPool ");
-
-        let strategy = super::RoundRobin::new();
+    #[test]
+    fn test_even_distribution() {
+        let pool = setup_pool(&three_backends());
+        let strategy = RoundRobin::new();
+        let healthy = pool.healthy_backends();
 
         for i in 0..300 {
             let selected = strategy
-                .select(&pool.healthy_backends(), None)
+                .select(&healthy, None)
                 .expect("Should select a backend");
-            let expected_index = i % pool.all_backends().len();
-            assert_eq!(selected, expected_index,);
+
+            assert_eq!(selected, i % healthy.len());
         }
     }
 
     #[test]
-    fn test_round_robin_wraps_around() {
-        let backends = [
-            BackendConfig {
-                addr: "0.0.0.0:8080".into(),
-                weight: 1,
-            },
-            BackendConfig {
-                addr: "0.0.0.1:8080".into(),
-                weight: 2,
-            },
-            BackendConfig {
-                addr: "0.0.0.2:8080".into(),
-                weight: 3,
-            },
-        ];
-
-        let pool = BackendPool::from_config(&backends).expect("BackendPool");
+    fn test_wraps_around() {
+        let pool = setup_pool(&three_backends());
+        let strategy = RoundRobin::new();
         let healthy = pool.healthy_backends();
-        let strategy = super::RoundRobin::new();
 
         assert_eq!(strategy.select(&healthy, None), Some(0));
         assert_eq!(strategy.select(&healthy, None), Some(1));
@@ -102,15 +91,13 @@ mod tests {
     }
 
     #[test]
-    fn test_round_robin_single_backend() {
-        let backends = [BackendConfig {
+    fn test_single_backend() {
+        let pool = setup_pool(&[BackendConfig {
             addr: "0.0.0.0:8080".into(),
             weight: 1,
-        }];
-
-        let pool = BackendPool::from_config(&backends).expect("BackendPool");
+        }]);
+        let strategy = RoundRobin::new();
         let healthy = pool.healthy_backends();
-        let strategy = super::RoundRobin::new();
 
         assert_eq!(strategy.select(&healthy, None), Some(0));
         assert_eq!(strategy.select(&healthy, None), Some(0));
@@ -118,9 +105,9 @@ mod tests {
     }
 
     #[test]
-    fn test_round_robin_empty_backends() {
+    fn test_empty_returns_none() {
+        let strategy = RoundRobin::new();
         let empty: Vec<Arc<Backend>> = Vec::new();
-        let strategy = super::RoundRobin::new();
 
         assert_eq!(strategy.select(&empty, None), None);
     }
