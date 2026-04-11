@@ -109,6 +109,6 @@ mod tests {
         let strategy = RoundRobin::new();
         let empty: Vec<Arc<Backend>> = Vec::new();
 
-        assert_eq!(strategy.select(&empty, None), None);
+        assert!(strategy.select(&empty, None).is_none());
     }
 }

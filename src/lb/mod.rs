@@ -6,6 +6,7 @@ use crate::config::Algorithm;
 
 mod ip_hash;
 mod least_connections;
+mod random;
 mod round_robin;
 mod weighted_round_robin;
 
@@ -20,7 +21,7 @@ pub fn create_strategy(algorithm: &Algorithm) -> Box<dyn LoadBalancingStrategy> 
         Algorithm::WeightedRoundRobin => Box::new(weighted_round_robin::WeightedRoundRobin::new()),
         Algorithm::LeastConnections => Box::new(least_connections::LeastConnections::new()),
         Algorithm::IpHash => Box::new(ip_hash::IpHash::new()),
-        Algorithm::Random => todo!(),
+        Algorithm::Random => Box::new(random::Random::new()),
     }
 }
 
@@ -44,5 +45,17 @@ mod tests {
     fn test_factory_creates_least_connections() {
         let strategy = super::create_strategy(&Algorithm::LeastConnections);
         assert_eq!(strategy.algorithm(), &Algorithm::LeastConnections);
+    }
+
+    #[test]
+    fn test_factory_creates_ip_hash() {
+        let strategy = super::create_strategy(&Algorithm::IpHash);
+        assert_eq!(strategy.algorithm(), &Algorithm::IpHash);
+    }
+
+    #[test]
+    fn test_factory_creates_random() {
+        let strategy = super::create_strategy(&Algorithm::Random);
+        assert_eq!(strategy.algorithm(), &Algorithm::Random);
     }
 }
