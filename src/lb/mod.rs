@@ -46,4 +46,16 @@ mod tests {
         let strategy = super::create_strategy(&Algorithm::LeastConnections);
         assert_eq!(strategy.algorithm(), &Algorithm::LeastConnections);
     }
+
+    #[test]
+    fn test_factory_creates_ip_hash() {
+        let strategy = super::create_strategy(&Algorithm::IpHash);
+        assert_eq!(strategy.algorithm(), &Algorithm::IpHash);
+    }
+
+    #[test]
+    fn test_factory_creates_random() {
+        let strategy = super::create_strategy(&Algorithm::Random);
+        assert_eq!(strategy.algorithm(), &Algorithm::Random);
+    }
 }

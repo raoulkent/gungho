@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use crate::backend::Backend;
 use crate::lb::LoadBalancingStrategy;
@@ -109,6 +109,6 @@ mod tests {
         let strategy = RoundRobin::new();
         let empty: Vec<Arc<Backend>> = Vec::new();
 
-        assert_eq!(strategy.select(&empty, None), None);
+        assert!(strategy.select(&empty, None).is_none());
     }
 }
