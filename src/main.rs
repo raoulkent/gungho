@@ -7,6 +7,9 @@ mod backend;
 #[allow(dead_code)]
 mod lb;
 
+#[allow(dead_code)]
+mod metrics;
+
 fn main() {
     println!("Hello, world!");
 }
