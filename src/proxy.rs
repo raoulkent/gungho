@@ -99,6 +99,11 @@ impl Proxy {
             client_addr.ip().to_string().parse().expect("Invalid IP"),
         );
 
+        req.headers_mut().insert(
+            "X-Forwarded-Host",
+            client_addr.to_string().parse().expect("Invalid Host"),
+        );
+
         let response = client.request(req).await;
 
         #[allow(clippy::option_if_let_else)]
