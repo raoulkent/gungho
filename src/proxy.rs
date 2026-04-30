@@ -125,155 +125,123 @@ mod tests {
     use super::*;
     use crate::backend::BackendPool;
     use crate::config::BackendConfig;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
 
-    use reqwest::get;
+    // --- Helpers ---
 
     fn setup_pool(configs: &[BackendConfig]) -> BackendPool {
         BackendPool::from_config(configs).expect("Failed to create BackendPool")
     }
 
     fn three_backends() -> Vec<BackendConfig> {
-        vec![
-            BackendConfig {
-                addr: "0.0.0.0:8080".into(),
+        (0..3)
+            .map(|i| BackendConfig {
+                addr: format!("0.0.0.{i}:8080"),
                 weight: 1,
-            },
-            BackendConfig {
-                addr: "0.0.0.1:8080".into(),
-                weight: 1,
-            },
-            BackendConfig {
-                addr: "0.0.0.2:8080".into(),
-                weight: 1,
-            },
-        ]
+            })
+            .collect()
     }
+
+    /// Spawns the proxy and returns the base URL (http://127.0.0.1:PORT)
+    async fn spawn_proxy(pool: BackendPool, algorithm: Algorithm) -> String {
+        let proxy = Proxy::new(pool, algorithm, "127.0.0.1:0").await;
+        let port = proxy.addr().port();
+        tokio::spawn(async move {
+            proxy.run().await;
+        });
+        format!("http://127.0.0.1:{port}")
+    }
+
+    /// A helper to spin up a dummy listener that captures the first request it receives
+    async fn spawn_mock_backend() -> (String, oneshot::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("Failed to bind mock backend");
+        let addr = listener
+            .local_addr()
+            .expect("Failed to read listener addr")
+            .to_string();
+        let (tx, rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0; 2048];
+                let n = stream
+                    .read(&mut buf)
+                    .await
+                    .expect("Failed to read from stream");
+                let request_str = String::from_utf8_lossy(&buf[..n]).to_string();
+
+                let response = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello";
+                stream
+                    .write_all(response)
+                    .await
+                    .expect("Failed to write response");
+                let _ = tx.send(request_str);
+            }
+        });
+
+        (addr, rx)
+    }
+
+    // --- Refactored Tests ---
 
     #[tokio::test]
     async fn test_proxy_503_no_healthy_backends() {
-        let backends = three_backends();
-        let pool = setup_pool(&backends);
-        pool.mark_unhealthy(0);
-        pool.mark_unhealthy(1);
-        pool.mark_unhealthy(2);
-        let algorithm = Algorithm::RoundRobin; // doesn't matter since all backends are unhealthy
+        let pool = setup_pool(&three_backends());
+        // Manually kill all backends in the pool
+        for i in 0..3 {
+            pool.mark_unhealthy(i);
+        }
 
-        let proxy = Proxy::new(pool, algorithm, "127.0.0.1:0").await;
-        let port = proxy.addr().port();
-
-        tokio::spawn(async move {
-            proxy.run().await; // runs forever in the background
-        });
-
-        let resp = get(format!("http://127.0.0.1:{port}"))
-            .await
-            .expect("Could not await response");
+        let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
+        let resp = reqwest::get(url).await.expect("Request failed");
 
         assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]
     async fn test_proxy_502_on_backend_error() {
-        let backends = three_backends();
-        let pool = setup_pool(&backends);
-        let algorithm = Algorithm::RoundRobin;
+        // Pool points to addresses that aren't listening
+        let pool = setup_pool(&three_backends());
+        let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
 
-        let proxy = Proxy::new(pool, algorithm, "127.0.0.1:0").await;
-        let port = proxy.addr().port();
-
-        tokio::spawn(async move {
-            proxy.run().await; // runs forever in the background
-        });
-
-        let resp = get(format!("http://127.0.0.1:{port}"))
-            .await
-            .expect("Could not await response");
-
+        let resp = reqwest::get(url).await.expect("Request failed");
         assert_eq!(resp.status(), reqwest::StatusCode::BAD_GATEWAY);
     }
 
     #[tokio::test]
-    async fn test_proxy_forwards_request() {
-        let mock_backend = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("Failed to bind mock backend");
-        let mock_addr = mock_backend.local_addr().expect("Failed to get mock addr");
-        tokio::spawn(async move {
-            let (mut stream, _) = mock_backend.accept().await.expect("Failed to accept");
-            tokio::io::AsyncWriteExt::write_all(
-                &mut stream,
-                b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello",
-            )
-            .await
-            .expect("Failed to write response");
-        });
+    async fn test_proxy_forwards_request_and_payload() {
+        let (addr, _) = spawn_mock_backend().await;
+        let pool = setup_pool(&[BackendConfig { addr, weight: 1 }]);
 
-        let backends = vec![BackendConfig {
-            addr: mock_addr.to_string(),
-            weight: 1,
-        }];
-        let pool = setup_pool(&backends);
-        let algorithm = Algorithm::RoundRobin;
+        let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
+        let resp = reqwest::get(url).await.expect("Request failed");
 
-        let proxy = Proxy::new(pool, algorithm, "127.0.0.1:0").await;
-        let port = proxy.addr().port();
-        tokio::spawn(async move {
-            proxy.run().await;
-        });
-
-        let resp = reqwest::get(format!("http://127.0.0.1:{port}"))
-            .await
-            .expect("Request failed");
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
-        assert_eq!(resp.text().await.expect("Failed to read body"), "hello");
+        assert_eq!(resp.text().await.expect("Failed to read response"), "hello");
     }
 
     #[tokio::test]
-    async fn test_proxy_adds_xforwarded_for() {
-        let mock_backend = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("Failed to bind mock backend");
-        let mock_addr = mock_backend.local_addr().expect("Failed to get mock addr");
+    async fn test_proxy_adds_required_headers() {
+        let (addr, rx) = spawn_mock_backend().await;
+        let pool = setup_pool(&[BackendConfig { addr, weight: 1 }]);
 
-        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-        tokio::spawn(async move {
-            let (mut stream, _) = mock_backend.accept().await.expect("Failed to accept");
+        let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
+        let _ = reqwest::get(url).await.expect("Request failed");
 
-            let mut buff = [0; 1024];
-            let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buff)
-                .await
-                .expect("Failed to read request");
+        let request_data = rx.await.expect("Mock backend did not receive request");
+        let request_lc = request_data.to_lowercase();
 
-            tx.send(String::from_utf8_lossy(&buff[..n]).to_string())
-                .expect("Failed to send request data");
-
-            tokio::io::AsyncWriteExt::write_all(
-                &mut stream,
-                b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello",
-            )
-            .await
-            .expect("Failed to write response");
-        });
-
-        let backends = vec![BackendConfig {
-            addr: mock_addr.to_string(),
-            weight: 1,
-        }];
-        let pool = setup_pool(&backends);
-        let algorithm = Algorithm::RoundRobin;
-
-        let proxy = Proxy::new(pool, algorithm, "127.0.0.1:0").await;
-        let port = proxy.addr().port();
-        tokio::spawn(async move {
-            proxy.run().await;
-        });
-
-        let resp = reqwest::get(format!("http://127.0.0.1:{port}"))
-            .await
-            .expect("Request failed");
-        assert_eq!(resp.status(), reqwest::StatusCode::OK);
-        let rx_data = rx.await.expect("Failed to receive request data");
-        eprintln!("Received request:\n{rx_data}");
-        assert!(rx_data.contains("x-forwarded-for:"));
+        assert!(
+            request_lc.contains("x-forwarded-for:"),
+            "Missing X-Forwarded-For"
+        );
+        assert!(
+            request_lc.contains("x-forwarded-host:"),
+            "Missing X-Forwarded-Host"
+        );
     }
 }
