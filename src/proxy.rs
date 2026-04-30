@@ -94,15 +94,31 @@ impl Proxy {
             .parse()
             .expect("Failed to parse URI");
 
+        // Add X-Forwarded-For and X-Forwarded-Host headers
         req.headers_mut().insert(
             "X-Forwarded-For",
             client_addr.ip().to_string().parse().expect("Invalid IP"),
         );
-
         req.headers_mut().insert(
             "X-Forwarded-Host",
             client_addr.to_string().parse().expect("Invalid Host"),
         );
+
+        // Remove hop-by-hop headers as per RFC 2616 Section 13.5.1
+        let hop_by_hop_headers = [
+            "Connection",
+            "Keep-Alive",
+            "Proxy-Authenticate",
+            "Proxy-Authorization",
+            "TE",
+            "Trailers",
+            "Transfer-Encoding",
+            "Upgrade",
+        ];
+
+        for header in &hop_by_hop_headers {
+            req.headers_mut().remove(*header);
+        }
 
         let response = client.request(req).await;
 
@@ -247,6 +263,67 @@ mod tests {
         assert!(
             request_lc.contains("x-forwarded-host:"),
             "Missing X-Forwarded-Host"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_proxy_strips_hop_by_hop() {
+        let (addr, rx) = spawn_mock_backend().await;
+        let pool = setup_pool(&[BackendConfig { addr, weight: 1 }]);
+
+        let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
+        let client = reqwest::Client::new();
+        let _ = client
+            .get(url)
+            .header("Connection", "keep-alive")
+            .header("Keep-Alive", "timeout=5")
+            .header(
+                "Proxy-Authenticate",
+                "Basic realm=\"Access to the staging site\"",
+            )
+            .header("Proxy-Authorization", "Basic dXNlcjpwYXNz")
+            .header("TE", "trailers, deflate")
+            .header("Trailers", "Expires")
+            .header("Transfer-Encoding", "chunked")
+            .header("Upgrade", "websocket")
+            .send()
+            .await
+            .expect("Request failed");
+
+        let request_data = rx.await.expect("Mock backend did not receive request");
+        let request_lc = request_data.to_lowercase();
+
+        assert!(
+            !request_lc.contains("connection:"),
+            "Hop-by-hop header 'Connection' was not stripped"
+        );
+        assert!(
+            !request_lc.contains("keep-alive:"),
+            "Hop-by-hop header 'Keep-Alive' was not stripped"
+        );
+        assert!(
+            !request_lc.contains("proxy-authenticate:"),
+            "Hop-by-hop header 'Proxy-Authenticate' was not stripped"
+        );
+        assert!(
+            !request_lc.contains("proxy-authorization:"),
+            "Hop-by-hop header 'Proxy-Authorization' was not stripped"
+        );
+        assert!(
+            !request_lc.contains("te:"),
+            "Hop-by-hop header 'TE' was not stripped"
+        );
+        assert!(
+            !request_lc.contains("trailers:"),
+            "Hop-by-hop header 'Trailers' was not stripped"
+        );
+        assert!(
+            !request_lc.contains("transfer-encoding:"),
+            "Hop-by-hop header 'Transfer-Encoding' was not stripped"
+        );
+        assert!(
+            !request_lc.contains("upgrade:"),
+            "Hop-by-hop header 'Upgrade' was not stripped"
         );
     }
 }
