@@ -5,7 +5,7 @@ use hyper::body::Incoming;
 use hyper::{Request, Response};
 use tokio::net::TcpListener;
 
-use crate::backend::BackendPool;
+use crate::backend::{Backend, BackendPool};
 use crate::config::Algorithm;
 use crate::lb;
 use crate::lb::LoadBalancingStrategy;
@@ -14,6 +14,23 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+struct ConnectionGuard {
+    backend: Arc<Backend>,
+}
+
+impl ConnectionGuard {
+    fn new(backend: Arc<Backend>) -> Self {
+        backend.increment_connections();
+        Self { backend }
+    }
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        self.backend.decrement_connections();
+    }
+}
+
 struct Proxy {
     listener: TcpListener,
     backend_pool: Arc<BackendPool>,
@@ -21,8 +38,7 @@ struct Proxy {
 }
 
 impl Proxy {
-    pub async fn new(pool: BackendPool, algorithm: Algorithm, addr: &str) -> Self {
-        let backend_pool = Arc::new(pool);
+    pub async fn new(pool: Arc<BackendPool>, algorithm: Algorithm, addr: &str) -> Self {
         let strategy = Arc::from(lb::create_strategy(&algorithm));
 
         let listener = TcpListener::bind(addr)
@@ -30,7 +46,7 @@ impl Proxy {
             .expect("Failed to bind to address");
         Self {
             listener,
-            backend_pool,
+            backend_pool: pool,
             strategy,
         }
     }
@@ -120,6 +136,8 @@ impl Proxy {
             req.headers_mut().remove(*header);
         }
 
+        let _guard = ConnectionGuard::new(Arc::clone(&backend));
+
         let response = client.request(req).await;
 
         #[allow(clippy::option_if_let_else)]
@@ -166,7 +184,7 @@ mod tests {
     }
 
     /// Spawns the proxy and returns the base URL (http://127.0.0.1:PORT)
-    async fn spawn_proxy(pool: BackendPool, algorithm: Algorithm) -> String {
+    async fn spawn_proxy(pool: Arc<BackendPool>, algorithm: Algorithm) -> String {
         let proxy = Proxy::new(pool, algorithm, "127.0.0.1:0").await;
         let port = proxy.addr().port();
         tokio::spawn(async move {
@@ -207,11 +225,53 @@ mod tests {
         (addr, rx)
     }
 
+    //
+    async fn spawn_mock_gated_backend(
+        gate_rx: oneshot::Receiver<()>,
+    ) -> (String, oneshot::Receiver<String>, oneshot::Receiver<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("Failed to bind mock backend");
+        let addr = listener
+            .local_addr()
+            .expect("Failed to read listener addr")
+            .to_string();
+        let (tx, rx) = oneshot::channel();
+        let (arrived_tx, arrived_rx) = oneshot::channel::<()>();
+
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0; 2048];
+                let n = stream
+                    .read(&mut buf)
+                    .await
+                    .expect("Failed to read from stream");
+                let request_str = String::from_utf8_lossy(&buf[..n]).to_string();
+
+                let response = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello";
+
+                // Signal that request has arrived
+                let _ = arrived_tx.send(());
+
+                // Wait for the gate signal before responding
+                gate_rx.await.expect("Failed to read from stream");
+
+                stream
+                    .write_all(response)
+                    .await
+                    .expect("Failed to write response");
+                let _ = tx.send(request_str);
+            }
+        });
+
+        (addr, rx, arrived_rx)
+    }
+
     // --- Refactored Tests ---
 
     #[tokio::test]
     async fn test_proxy_503_no_healthy_backends() {
-        let pool = setup_pool(&three_backends());
+        let pool = Arc::new(setup_pool(&three_backends()));
         // Manually kill all backends in the pool
         for i in 0..3 {
             pool.mark_unhealthy(i);
@@ -226,7 +286,7 @@ mod tests {
     #[tokio::test]
     async fn test_proxy_502_on_backend_error() {
         // Pool points to addresses that aren't listening
-        let pool = setup_pool(&three_backends());
+        let pool = Arc::new(setup_pool(&three_backends()));
         let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
 
         let resp = reqwest::get(url).await.expect("Request failed");
@@ -236,7 +296,7 @@ mod tests {
     #[tokio::test]
     async fn test_proxy_forwards_request_and_payload() {
         let (addr, _) = spawn_mock_backend().await;
-        let pool = setup_pool(&[BackendConfig { addr, weight: 1 }]);
+        let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
 
         let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
         let resp = reqwest::get(url).await.expect("Request failed");
@@ -248,8 +308,7 @@ mod tests {
     #[tokio::test]
     async fn test_proxy_adds_required_headers() {
         let (addr, rx) = spawn_mock_backend().await;
-        let pool = setup_pool(&[BackendConfig { addr, weight: 1 }]);
-
+        let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
         let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
         let _ = reqwest::get(url).await.expect("Request failed");
 
@@ -269,7 +328,7 @@ mod tests {
     #[tokio::test]
     async fn test_proxy_strips_hop_by_hop() {
         let (addr, rx) = spawn_mock_backend().await;
-        let pool = setup_pool(&[BackendConfig { addr, weight: 1 }]);
+        let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
 
         let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
         let client = reqwest::Client::new();
@@ -325,5 +384,22 @@ mod tests {
             !request_lc.contains("upgrade:"),
             "Hop-by-hop header 'Upgrade' was not stripped"
         );
+    }
+
+    #[tokio::test]
+    async fn test_connection_count_increments() {
+        let (gate_tx, gate_rx) = oneshot::channel();
+        let (addr, _rx, arrived_rx) = spawn_mock_gated_backend(gate_rx).await;
+        let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
+        let url = spawn_proxy(Arc::clone(&pool), Algorithm::RoundRobin).await;
+        let request_handle =
+            tokio::spawn(async move { reqwest::get(url).await.expect("Request failed") });
+
+        arrived_rx.await.expect("Request never arrived at backend");
+        assert_eq!(pool.all_backends()[0].get_active_connections(), 1);
+
+        gate_tx.send(()).expect("Failed to open gate");
+        let _resp = request_handle.await.expect("Task panicked");
+        assert_eq!(pool.all_backends()[0].get_active_connections(), 0);
     }
 }
