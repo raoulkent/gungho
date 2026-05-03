@@ -110,15 +110,22 @@ impl Proxy {
             .parse()
             .expect("Failed to parse URI");
 
-        // Add X-Forwarded-For and X-Forwarded-Host headers
+        // Add X-Forwarded-For, X-Forwarded-Host and X-Forwarded-Proto headers
         req.headers_mut().insert(
             "X-Forwarded-For",
             client_addr.ip().to_string().parse().expect("Invalid IP"),
         );
+        req.headers_mut()
+            .insert("X-Forwarded-Proto", "http".parse().expect("Invalid Scheme"));
+
+        let original_host = req.headers().get("host").cloned();
         req.headers_mut().insert(
-            "X-Forwarded-Host",
-            client_addr.to_string().parse().expect("Invalid Host"),
+            "Host",
+            backend_addr.to_string().parse().expect("Invalid Host"),
         );
+        if let Some(host) = original_host {
+            req.headers_mut().insert("X-Forwarded-Host", host);
+        }
 
         // Remove hop-by-hop headers as per RFC 2616 Section 13.5.1
         let hop_by_hop_headers = [
@@ -322,6 +329,14 @@ mod tests {
         assert!(
             request_lc.contains("x-forwarded-host:"),
             "Missing X-Forwarded-Host"
+        );
+        assert!(
+            request_lc.contains("x-forwarded-proto:"),
+            "Missing X-Forwarded-Proto"
+        );
+        assert!(
+            request_lc.contains("x-forwarded-proto: http"),
+            "X-Forwarded-Proto should be 'http'"
         );
     }
 
