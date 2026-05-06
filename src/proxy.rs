@@ -4,6 +4,7 @@ use http_body_util::{Either, Full};
 use hyper::body::Incoming;
 use hyper::{Request, Response};
 use tokio::net::TcpListener;
+use tokio::time::{Duration, timeout};
 
 use crate::backend::{Backend, BackendPool};
 use crate::config::Algorithm;
@@ -35,10 +36,16 @@ struct Proxy {
     listener: TcpListener,
     backend_pool: Arc<BackendPool>,
     strategy: Arc<dyn LoadBalancingStrategy>,
+    timeout: Duration,
 }
 
 impl Proxy {
-    pub async fn new(pool: Arc<BackendPool>, algorithm: Algorithm, addr: &str) -> Self {
+    pub async fn new(
+        pool: Arc<BackendPool>,
+        algorithm: Algorithm,
+        addr: &str,
+        timeout: Duration,
+    ) -> Self {
         let strategy = Arc::from(lb::create_strategy(&algorithm));
 
         let listener = TcpListener::bind(addr)
@@ -48,6 +55,7 @@ impl Proxy {
             listener,
             backend_pool: pool,
             strategy,
+            timeout,
         }
     }
 
@@ -63,13 +71,17 @@ impl Proxy {
 
             let pool = Arc::clone(&self.backend_pool);
             let strategy = Arc::clone(&self.strategy);
+            let request_timeout = self.timeout;
 
             let connection = http.serve_connection(
                 hyper_util::rt::TokioIo::new(stream),
                 hyper::service::service_fn(move |req| {
                     let pool = Arc::clone(&pool);
                     let strategy = Arc::clone(&strategy);
-                    async move { Self::handle_request(req, client_addr, pool, strategy).await }
+                    async move {
+                        Self::handle_request(req, client_addr, pool, strategy, request_timeout)
+                            .await
+                    }
                 }),
             );
 
@@ -86,6 +98,7 @@ impl Proxy {
         client_addr: SocketAddr,
         pool: Arc<BackendPool>,
         strategy: Arc<dyn LoadBalancingStrategy>,
+        request_timeout: Duration,
     ) -> Result<Response<Either<Incoming, Full<Bytes>>>, Infallible> {
         let healthy = pool.healthy_backends();
 
@@ -143,17 +156,20 @@ impl Proxy {
             req.headers_mut().remove(*header);
         }
 
-        let _guard = ConnectionGuard::new(Arc::clone(&backend));
+        let _guard = ConnectionGuard::new(Arc::clone(backend));
 
-        let response = client.request(req).await;
-
-        #[allow(clippy::option_if_let_else)]
-        match response {
-            Ok(resp) => Ok(resp.map(Either::Left)),
-            Err(_) => Ok(Response::builder()
+        match timeout(request_timeout, client.request(req)).await {
+            Ok(Ok(resp)) => Ok(resp.map(Either::Left)),
+            Ok(Err(_)) => Ok(Response::builder()
                 .status(502)
                 .body(Either::Right(Full::new(Bytes::from_static(
                     b"Backend error",
+                ))))
+                .expect("Failed to build response")),
+            Err(_) => Ok(Response::builder()
+                .status(504)
+                .body(Either::Right(Full::new(Bytes::from_static(
+                    b"Gateway Timeout",
                 ))))
                 .expect("Failed to build response")),
         }
@@ -191,8 +207,13 @@ mod tests {
     }
 
     /// Spawns the proxy and returns the base URL (http://127.0.0.1:PORT)
-    async fn spawn_proxy(pool: Arc<BackendPool>, algorithm: Algorithm) -> String {
-        let proxy = Proxy::new(pool, algorithm, "127.0.0.1:0").await;
+    async fn spawn_proxy(
+        pool: Arc<BackendPool>,
+        algorithm: Algorithm,
+        proxy_timeout: Option<Duration>,
+    ) -> String {
+        let timeout = proxy_timeout.unwrap_or(Duration::from_secs(5));
+        let proxy = Proxy::new(pool, algorithm, "127.0.0.1:0", timeout).await;
         let port = proxy.addr().port();
         tokio::spawn(async move {
             proxy.run().await;
@@ -284,7 +305,7 @@ mod tests {
             pool.mark_unhealthy(i);
         }
 
-        let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
+        let url = spawn_proxy(pool, Algorithm::RoundRobin, None).await;
         let resp = reqwest::get(url).await.expect("Request failed");
 
         assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
@@ -294,7 +315,7 @@ mod tests {
     async fn test_proxy_502_on_backend_error() {
         // Pool points to addresses that aren't listening
         let pool = Arc::new(setup_pool(&three_backends()));
-        let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
+        let url = spawn_proxy(pool, Algorithm::RoundRobin, None).await;
 
         let resp = reqwest::get(url).await.expect("Request failed");
         assert_eq!(resp.status(), reqwest::StatusCode::BAD_GATEWAY);
@@ -305,7 +326,7 @@ mod tests {
         let (addr, _) = spawn_mock_backend().await;
         let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
 
-        let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
+        let url = spawn_proxy(pool, Algorithm::RoundRobin, None).await;
         let resp = reqwest::get(url).await.expect("Request failed");
 
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
@@ -316,7 +337,7 @@ mod tests {
     async fn test_proxy_adds_required_headers() {
         let (addr, rx) = spawn_mock_backend().await;
         let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
-        let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
+        let url = spawn_proxy(pool, Algorithm::RoundRobin, None).await;
         let _ = reqwest::get(url).await.expect("Request failed");
 
         let request_data = rx.await.expect("Mock backend did not receive request");
@@ -345,7 +366,7 @@ mod tests {
         let (addr, rx) = spawn_mock_backend().await;
         let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
 
-        let url = spawn_proxy(pool, Algorithm::RoundRobin).await;
+        let url = spawn_proxy(pool, Algorithm::RoundRobin, None).await;
         let client = reqwest::Client::new();
         let _ = client
             .get(url)
@@ -406,7 +427,7 @@ mod tests {
         let (gate_tx, gate_rx) = oneshot::channel();
         let (addr, _rx, arrived_rx) = spawn_mock_gated_backend(gate_rx).await;
         let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
-        let url = spawn_proxy(Arc::clone(&pool), Algorithm::RoundRobin).await;
+        let url = spawn_proxy(Arc::clone(&pool), Algorithm::RoundRobin, None).await;
         let request_handle =
             tokio::spawn(async move { reqwest::get(url).await.expect("Request failed") });
 
@@ -416,5 +437,18 @@ mod tests {
         gate_tx.send(()).expect("Failed to open gate");
         let _resp = request_handle.await.expect("Task panicked");
         assert_eq!(pool.all_backends()[0].get_active_connections(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_proxy_504_on_timeout() {
+        let (_gate_tx, gate_rx) = oneshot::channel();
+        let (addr, _rx, _arrived_rx) = spawn_mock_gated_backend(gate_rx).await;
+        let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
+        let url = spawn_proxy(pool, Algorithm::RoundRobin, Some(Duration::from_micros(50))).await;
+        let request_handle =
+            tokio::spawn(async move { reqwest::get(url).await.expect("Request failed") });
+
+        let resp = request_handle.await.expect("Task panicked");
+        assert_eq!(resp.status(), reqwest::StatusCode::GATEWAY_TIMEOUT);
     }
 }
