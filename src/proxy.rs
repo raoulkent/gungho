@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use http_body_util::{Either, Full};
 
+use hyper::StatusCode;
 use hyper::body::Incoming;
 use hyper::{Request, Response};
 use tokio::net::TcpListener;
@@ -10,6 +11,7 @@ use crate::backend::{Backend, BackendPool};
 use crate::config::Algorithm;
 use crate::lb;
 use crate::lb::LoadBalancingStrategy;
+use crate::metrics::GunghoMetrics;
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -37,6 +39,7 @@ struct Proxy {
     backend_pool: Arc<BackendPool>,
     strategy: Arc<dyn LoadBalancingStrategy>,
     timeout: Duration,
+    metrics: Arc<GunghoMetrics>,
 }
 
 impl Proxy {
@@ -47,6 +50,7 @@ impl Proxy {
         timeout: Duration,
     ) -> Self {
         let strategy = Arc::from(lb::create_strategy(&algorithm));
+        let metrics = Arc::from(GunghoMetrics::new());
 
         let listener = TcpListener::bind(addr)
             .await
@@ -56,6 +60,7 @@ impl Proxy {
             backend_pool: pool,
             strategy,
             timeout,
+            metrics,
         }
     }
 
@@ -72,15 +77,24 @@ impl Proxy {
             let pool = Arc::clone(&self.backend_pool);
             let strategy = Arc::clone(&self.strategy);
             let request_timeout = self.timeout;
+            let metrics: Arc<GunghoMetrics> = Arc::clone(&self.metrics);
 
             let connection = http.serve_connection(
                 hyper_util::rt::TokioIo::new(stream),
                 hyper::service::service_fn(move |req| {
                     let pool = Arc::clone(&pool);
                     let strategy = Arc::clone(&strategy);
+                    let metrics = Arc::clone(&metrics);
                     async move {
-                        Self::handle_request(req, client_addr, pool, strategy, request_timeout)
-                            .await
+                        Self::handle_request(
+                            req,
+                            client_addr,
+                            pool,
+                            strategy,
+                            request_timeout,
+                            metrics,
+                        )
+                        .await
                     }
                 }),
             );
@@ -99,6 +113,7 @@ impl Proxy {
         pool: Arc<BackendPool>,
         strategy: Arc<dyn LoadBalancingStrategy>,
         request_timeout: Duration,
+        metrics: Arc<GunghoMetrics>,
     ) -> Result<Response<Either<Incoming, Full<Bytes>>>, Infallible> {
         let healthy = pool.healthy_backends();
 
@@ -157,21 +172,49 @@ impl Proxy {
         }
 
         let _guard = ConnectionGuard::new(Arc::clone(backend));
+        let start = std::time::Instant::now();
 
         match timeout(request_timeout, client.request(req)).await {
-            Ok(Ok(resp)) => Ok(resp.map(Either::Left)),
-            Ok(Err(_)) => Ok(Response::builder()
-                .status(502)
-                .body(Either::Right(Full::new(Bytes::from_static(
-                    b"Backend error",
-                ))))
-                .expect("Failed to build response")),
-            Err(_) => Ok(Response::builder()
-                .status(504)
-                .body(Either::Right(Full::new(Bytes::from_static(
-                    b"Gateway Timeout",
-                ))))
-                .expect("Failed to build response")),
+            Ok(Ok(resp)) => {
+                let status = resp.status();
+                metrics.record_request(
+                    status,
+                    &backend_addr.to_string(),
+                    start.elapsed().as_secs_f64(),
+                );
+
+                Ok(resp.map(Either::Left))
+            }
+            Ok(Err(_)) => {
+                let status = StatusCode::BAD_GATEWAY;
+                metrics.record_request(
+                    status,
+                    &backend_addr.to_string(),
+                    start.elapsed().as_secs_f64(),
+                );
+
+                Ok(Response::builder()
+                    .status(502)
+                    .body(Either::Right(Full::new(Bytes::from_static(
+                        b"Backend error",
+                    ))))
+                    .expect("Failed to build response"))
+            }
+            Err(_) => {
+                let status = StatusCode::GATEWAY_TIMEOUT;
+                metrics.record_request(
+                    status,
+                    &backend_addr.to_string(),
+                    start.elapsed().as_secs_f64(),
+                );
+
+                Ok(Response::builder()
+                    .status(504)
+                    .body(Either::Right(Full::new(Bytes::from_static(
+                        b"Gateway Timeout",
+                    ))))
+                    .expect("Failed to build response"))
+            }
         }
     }
 
