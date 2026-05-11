@@ -108,6 +108,29 @@ impl Proxy {
         }
     }
 
+    fn insert_x_forwarded_headers(
+        header_map: &mut HeaderMap<HeaderValue>,
+        client_addr: SocketAddr,
+        backend_addr: SocketAddr,
+    ) {
+        // Add X-Forwarded-For, X-Forwarded-Host and X-Forwarded-Proto headers
+        header_map.insert(
+            "X-Forwarded-For",
+            client_addr.ip().to_string().parse().expect("Invalid IP"),
+        );
+        header_map.insert("X-Forwarded-Proto", "http".parse().expect("Invalid Scheme"));
+
+        let original_host = header_map.get("host").cloned();
+        header_map.insert(
+            "Host",
+            backend_addr.to_string().parse().expect("Invalid Host"),
+        );
+
+        if let Some(host) = original_host {
+            header_map.insert("X-Forwarded-Host", host);
+        }
+    }
+
     fn strip_hop_by_hop_headers(header_map: &mut HeaderMap<HeaderValue>) {
         // Remove hop-by-hop headers as per RFC 2616 Section 13.5.1
         let hop_by_hop_headers = [
@@ -161,22 +184,7 @@ impl Proxy {
             .parse()
             .expect("Failed to parse URI");
 
-        // Add X-Forwarded-For, X-Forwarded-Host and X-Forwarded-Proto headers
-        req.headers_mut().insert(
-            "X-Forwarded-For",
-            client_addr.ip().to_string().parse().expect("Invalid IP"),
-        );
-        req.headers_mut()
-            .insert("X-Forwarded-Proto", "http".parse().expect("Invalid Scheme"));
-
-        let original_host = req.headers().get("host").cloned();
-        req.headers_mut().insert(
-            "Host",
-            backend_addr.to_string().parse().expect("Invalid Host"),
-        );
-        if let Some(host) = original_host {
-            req.headers_mut().insert("X-Forwarded-Host", host);
-        }
+        Self::insert_x_forwarded_headers(req.headers_mut(), client_addr, backend_addr);
 
         Self::strip_hop_by_hop_headers(req.headers_mut());
 
