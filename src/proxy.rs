@@ -3,7 +3,8 @@ use http_body_util::{Either, Full};
 
 use hyper::StatusCode;
 use hyper::body::Incoming;
-use hyper::{Request, Response};
+use hyper::http::header::HeaderValue;
+use hyper::{HeaderMap, Request, Response};
 use tokio::net::TcpListener;
 use tokio::time::{Duration, timeout};
 
@@ -107,6 +108,24 @@ impl Proxy {
         }
     }
 
+    fn strip_hop_by_hop_headers(header_map: &mut HeaderMap<HeaderValue>) {
+        // Remove hop-by-hop headers as per RFC 2616 Section 13.5.1
+        let hop_by_hop_headers = [
+            "Connection",
+            "Keep-Alive",
+            "Proxy-Authenticate",
+            "Proxy-Authorization",
+            "TE",
+            "Trailers",
+            "Transfer-Encoding",
+            "Upgrade",
+        ];
+
+        for header in &hop_by_hop_headers {
+            header_map.remove(*header);
+        }
+    }
+
     async fn handle_request(
         mut req: Request<Incoming>,
         client_addr: SocketAddr,
@@ -118,7 +137,11 @@ impl Proxy {
         let healthy = pool.healthy_backends();
 
         let Some(index) = strategy.select(&healthy, Some(&client_addr)) else {
-            // no backend selected → 503
+            let status = StatusCode::SERVICE_UNAVAILABLE;
+            metrics.record_request(
+                status, "none", 0.0, // No backend means no processing time
+            );
+
             return Ok(Response::builder()
                 .status(503)
                 .body(Either::Right(Full::new(Bytes::from_static(
@@ -155,33 +178,21 @@ impl Proxy {
             req.headers_mut().insert("X-Forwarded-Host", host);
         }
 
-        // Remove hop-by-hop headers as per RFC 2616 Section 13.5.1
-        let hop_by_hop_headers = [
-            "Connection",
-            "Keep-Alive",
-            "Proxy-Authenticate",
-            "Proxy-Authorization",
-            "TE",
-            "Trailers",
-            "Transfer-Encoding",
-            "Upgrade",
-        ];
-
-        for header in &hop_by_hop_headers {
-            req.headers_mut().remove(*header);
-        }
+        Self::strip_hop_by_hop_headers(req.headers_mut());
 
         let _guard = ConnectionGuard::new(Arc::clone(backend));
         let start = std::time::Instant::now();
 
         match timeout(request_timeout, client.request(req)).await {
-            Ok(Ok(resp)) => {
+            Ok(Ok(mut resp)) => {
                 let status = resp.status();
                 metrics.record_request(
                     status,
                     &backend_addr.to_string(),
                     start.elapsed().as_secs_f64(),
                 );
+
+                Self::strip_hop_by_hop_headers(resp.headers_mut());
 
                 Ok(resp.map(Either::Left))
             }
