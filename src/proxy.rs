@@ -1,5 +1,7 @@
 use bytes::Bytes;
 use http_body_util::{Either, Full};
+use hyper_util::client::legacy::Client;
+use hyper_util::client::legacy::connect::HttpConnector;
 
 use hyper::StatusCode;
 use hyper::body::Incoming;
@@ -41,6 +43,7 @@ struct Proxy {
     strategy: Arc<dyn LoadBalancingStrategy>,
     timeout: Duration,
     metrics: Arc<GunghoMetrics>,
+    client: Client<HttpConnector, Incoming>,
 }
 
 impl Proxy {
@@ -52,16 +55,18 @@ impl Proxy {
     ) -> Self {
         let strategy = Arc::from(lb::create_strategy(&algorithm));
         let metrics = Arc::from(GunghoMetrics::new());
-
         let listener = TcpListener::bind(addr)
             .await
             .expect("Failed to bind to address");
+        let client = Client::builder(hyper_util::rt::TokioExecutor::new()).build_http();
+
         Self {
             listener,
             pool,
             strategy,
             timeout,
             metrics,
+            client,
         }
     }
     pub async fn run(self) {
@@ -148,10 +153,6 @@ impl Proxy {
         self: Arc<Self>,
         mut req: Request<Incoming>,
         client_addr: SocketAddr,
-        // pool: Arc<BackendPool>,
-        // strategy: Arc<dyn LoadBalancingStrategy>,
-        // request_timeout: Duration,
-        // metrics: Arc<GunghoMetrics>,
     ) -> Result<Response<Either<Incoming, Full<Bytes>>>, Infallible> {
         let healthy = self.pool.healthy_backends();
         let start = std::time::Instant::now();
@@ -170,10 +171,6 @@ impl Proxy {
         let backend = &healthy[index];
         let backend_addr = backend.get_addr();
 
-        let client =
-            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                .build_http();
-
         *req.uri_mut() = format!("http://{backend_addr}{}", req.uri().path())
             .parse()
             .expect("Failed to parse URI");
@@ -184,7 +181,7 @@ impl Proxy {
 
         let _guard = ConnectionGuard::new(Arc::clone(backend));
 
-        match timeout(self.timeout, client.request(req)).await {
+        match timeout(self.timeout, self.client.request(req)).await {
             Ok(Ok(mut resp)) => {
                 let status = resp.status();
                 self.metrics.record_request(
