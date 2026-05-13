@@ -168,12 +168,11 @@ impl Proxy {
         metrics: Arc<GunghoMetrics>,
     ) -> Result<Response<Either<Incoming, Full<Bytes>>>, Infallible> {
         let healthy = pool.healthy_backends();
+        let start = std::time::Instant::now();
 
         let Some(index) = strategy.select(&healthy, Some(&client_addr)) else {
             let status = StatusCode::SERVICE_UNAVAILABLE;
-            metrics.record_request(
-                status, "none", 0.0, // No backend means no processing time
-            );
+            metrics.record_request(status, "none", start.elapsed().as_secs_f64());
 
             return Ok(Self::build_error_response(
                 status,
@@ -197,7 +196,6 @@ impl Proxy {
         Self::strip_hop_by_hop_headers(req.headers_mut());
 
         let _guard = ConnectionGuard::new(Arc::clone(backend));
-        let start = std::time::Instant::now();
 
         match timeout(request_timeout, client.request(req)).await {
             Ok(Ok(mut resp)) => {
