@@ -149,6 +149,16 @@ impl Proxy {
         }
     }
 
+    fn build_error_response(
+        status: StatusCode,
+        string: &'static [u8],
+    ) -> Response<Either<Incoming, Full<Bytes>>> {
+        Response::builder()
+            .status(status)
+            .body(Either::Right(Full::new(Bytes::from_static(string))))
+            .expect("Failed to build response")
+    }
+
     async fn handle_request(
         mut req: Request<Incoming>,
         client_addr: SocketAddr,
@@ -165,12 +175,10 @@ impl Proxy {
                 status, "none", 0.0, // No backend means no processing time
             );
 
-            return Ok(Response::builder()
-                .status(503)
-                .body(Either::Right(Full::new(Bytes::from_static(
-                    b"No healthy backends available",
-                ))))
-                .expect("Failed to build response"));
+            return Ok(Self::build_error_response(
+                status,
+                b"No healthy backends available",
+            ));
         };
 
         let backend = &healthy[index];
@@ -212,12 +220,7 @@ impl Proxy {
                     start.elapsed().as_secs_f64(),
                 );
 
-                Ok(Response::builder()
-                    .status(502)
-                    .body(Either::Right(Full::new(Bytes::from_static(
-                        b"Backend error",
-                    ))))
-                    .expect("Failed to build response"))
+                Ok(Self::build_error_response(status, b"Backend error"))
             }
             Err(_) => {
                 let status = StatusCode::GATEWAY_TIMEOUT;
@@ -227,12 +230,7 @@ impl Proxy {
                     start.elapsed().as_secs_f64(),
                 );
 
-                Ok(Response::builder()
-                    .status(504)
-                    .body(Either::Right(Full::new(Bytes::from_static(
-                        b"Gateway Timeout",
-                    ))))
-                    .expect("Failed to build response"))
+                Ok(Self::build_error_response(status, b"Gateway Timeout"))
             }
         }
     }
