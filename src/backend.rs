@@ -90,7 +90,7 @@ impl BackendPool {
             .collect()
     }
 
-    fn mark_healthy(&self, index: usize) -> Option<()> {
+    pub(crate) fn mark_healthy(&self, index: usize) -> Option<()> {
         self.backends
             .get(index)?
             .healthy
@@ -99,7 +99,7 @@ impl BackendPool {
         Some(())
     }
 
-    fn mark_unhealthy(&self, index: usize) -> Option<()> {
+    pub(crate) fn mark_unhealthy(&self, index: usize) -> Option<()> {
         self.backends
             .get(index)?
             .healthy

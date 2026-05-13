@@ -10,6 +10,9 @@ mod lb;
 #[allow(dead_code)]
 mod metrics;
 
+#[allow(dead_code)]
+mod proxy;
+
 fn main() {
     println!("Hello, world!");
 }
