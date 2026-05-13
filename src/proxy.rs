@@ -37,7 +37,7 @@ impl Drop for ConnectionGuard {
 
 struct Proxy {
     listener: TcpListener,
-    backend_pool: Arc<BackendPool>,
+    pool: Arc<BackendPool>,
     strategy: Arc<dyn LoadBalancingStrategy>,
     timeout: Duration,
     metrics: Arc<GunghoMetrics>,
@@ -58,45 +58,30 @@ impl Proxy {
             .expect("Failed to bind to address");
         Self {
             listener,
-            backend_pool: pool,
+            pool,
             strategy,
             timeout,
             metrics,
         }
     }
-
     pub async fn run(self) {
         let http = hyper::server::conn::http1::Builder::new();
+        let this = Arc::new(self);
 
         loop {
-            let (stream, client_addr) = self
+            let (stream, client_addr) = this
                 .listener
                 .accept()
                 .await
                 .expect("Failed to accept connection");
 
-            let pool = Arc::clone(&self.backend_pool);
-            let strategy = Arc::clone(&self.strategy);
-            let request_timeout = self.timeout;
-            let metrics: Arc<GunghoMetrics> = Arc::clone(&self.metrics);
+            let this = Arc::clone(&this);
 
             let connection = http.serve_connection(
                 hyper_util::rt::TokioIo::new(stream),
                 hyper::service::service_fn(move |req| {
-                    let pool = Arc::clone(&pool);
-                    let strategy = Arc::clone(&strategy);
-                    let metrics = Arc::clone(&metrics);
-                    async move {
-                        Self::handle_request(
-                            req,
-                            client_addr,
-                            pool,
-                            strategy,
-                            request_timeout,
-                            metrics,
-                        )
-                        .await
-                    }
+                    let this = Arc::clone(&this);
+                    async move { this.handle_request(req, client_addr).await }
                 }),
             );
 
@@ -160,19 +145,21 @@ impl Proxy {
     }
 
     async fn handle_request(
+        self: Arc<Self>,
         mut req: Request<Incoming>,
         client_addr: SocketAddr,
-        pool: Arc<BackendPool>,
-        strategy: Arc<dyn LoadBalancingStrategy>,
-        request_timeout: Duration,
-        metrics: Arc<GunghoMetrics>,
+        // pool: Arc<BackendPool>,
+        // strategy: Arc<dyn LoadBalancingStrategy>,
+        // request_timeout: Duration,
+        // metrics: Arc<GunghoMetrics>,
     ) -> Result<Response<Either<Incoming, Full<Bytes>>>, Infallible> {
-        let healthy = pool.healthy_backends();
+        let healthy = self.pool.healthy_backends();
         let start = std::time::Instant::now();
 
-        let Some(index) = strategy.select(&healthy, Some(&client_addr)) else {
+        let Some(index) = self.strategy.select(&healthy, Some(&client_addr)) else {
             let status = StatusCode::SERVICE_UNAVAILABLE;
-            metrics.record_request(status, "none", start.elapsed().as_secs_f64());
+            self.metrics
+                .record_request(status, "none", start.elapsed().as_secs_f64());
 
             return Ok(Self::build_error_response(
                 status,
@@ -197,10 +184,10 @@ impl Proxy {
 
         let _guard = ConnectionGuard::new(Arc::clone(backend));
 
-        match timeout(request_timeout, client.request(req)).await {
+        match timeout(self.timeout, client.request(req)).await {
             Ok(Ok(mut resp)) => {
                 let status = resp.status();
-                metrics.record_request(
+                self.metrics.record_request(
                     status,
                     &backend_addr.to_string(),
                     start.elapsed().as_secs_f64(),
@@ -212,7 +199,7 @@ impl Proxy {
             }
             Ok(Err(_)) => {
                 let status = StatusCode::BAD_GATEWAY;
-                metrics.record_request(
+                self.metrics.record_request(
                     status,
                     &backend_addr.to_string(),
                     start.elapsed().as_secs_f64(),
@@ -222,7 +209,7 @@ impl Proxy {
             }
             Err(_) => {
                 let status = StatusCode::GATEWAY_TIMEOUT;
-                metrics.record_request(
+                self.metrics.record_request(
                     status,
                     &backend_addr.to_string(),
                     start.elapsed().as_secs_f64(),
