@@ -82,6 +82,13 @@ impl BackendPool {
         &self.backends
     }
 
+    pub fn get_health_by_addr(&self, addr: SocketAddr) -> Option<bool> {
+        self.backends
+            .iter()
+            .find(|b| b.addr == addr)
+            .map(|b| b.healthy.load(Ordering::SeqCst))
+    }
+
     pub fn healthy_backends(&self) -> Vec<Arc<Backend>> {
         self.backends
             .iter()
@@ -102,6 +109,26 @@ impl BackendPool {
     pub(crate) fn mark_unhealthy(&self, index: usize) -> Option<()> {
         self.backends
             .get(index)?
+            .healthy
+            .store(false, Ordering::SeqCst);
+
+        Some(())
+    }
+
+    pub(crate) fn mark_healthy_by_addr(&self, addr: SocketAddr) -> Option<()> {
+        self.backends
+            .iter()
+            .find(|b| b.addr == addr)?
+            .healthy
+            .store(true, Ordering::SeqCst);
+
+        Some(())
+    }
+
+    pub(crate) fn mark_unhealthy_by_addr(&self, addr: SocketAddr) -> Option<()> {
+        self.backends
+            .iter()
+            .find(|b| b.addr == addr)?
             .healthy
             .store(false, Ordering::SeqCst);
 
