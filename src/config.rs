@@ -79,9 +79,9 @@ impl Default for HealthCheckConfig {
 #[serde(default)]
 /// Timeouts for backend connections in seconds
 pub struct TimeoutConfig {
-    connect: u64,
-    read: u64,
-    write: u64,
+    pub connect: u64,
+    pub read: u64,
+    pub write: u64,
 }
 
 impl Default for TimeoutConfig {
@@ -247,6 +247,25 @@ mod tests {
         };
 
         assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn test_timeout_config_fields_accessible() {
+        let config_str = r#"
+            [[backends]]
+            addr = "127.0.0.1:3000"
+
+            [timeouts]
+            connect = 10
+            read = 60
+            write = 45
+        "#;
+
+        let config = toml::from_str::<Config>(config_str).expect("failed to read config");
+
+        assert_eq!(config.timeouts.connect, 10);
+        assert_eq!(config.timeouts.read, 60);
+        assert_eq!(config.timeouts.write, 45);
     }
 
     #[test]
