@@ -172,7 +172,8 @@ impl Proxy {
         let backend = &healthy[index];
         let backend_addr = backend.get_addr();
 
-        *req.uri_mut() = format!("http://{backend_addr}{}", req.uri().path())
+        let path_and_query = req.uri().path_and_query().map_or("/", |pq| pq.as_str());
+        *req.uri_mut() = format!("http://{backend_addr}{path_and_query}")
             .parse()
             .expect("Failed to parse URI");
 
@@ -228,8 +229,11 @@ impl Proxy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
+
     use crate::backend::BackendPool;
     use crate::config::BackendConfig;
+
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;
@@ -533,5 +537,21 @@ mod tests {
         .await;
 
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_proxy_forwards_query_params() {
+        let (addr, rx) = spawn_mock_backend().await;
+        let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
+        let url = spawn_proxy(pool, Algorithm::RoundRobin, None).await;
+        let resp = reqwest::get(format!("{url}/?foo=bar"))
+            .await
+            .expect("Request failed");
+
+        let request_data = rx.await.expect("Mock failed to receive request");
+
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        assert_eq!(resp.text().await.expect("Failed to read response"), "hello");
+        assert!(request_data.contains("GET /?foo=bar HTTP/1.1"));
     }
 }
