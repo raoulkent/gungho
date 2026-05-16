@@ -43,13 +43,13 @@ const fn default_weight() -> u32 {
 #[serde(rename_all = "snake_case")]
 #[serde(default)]
 pub struct HealthCheckConfig {
-    path: String,
+    pub path: String,
     /// Interval between health checks in seconds
-    interval: u64,
+    pub interval: u64,
     /// Timeout for each health check request in seconds
-    timeout: u64,
-    health_threshold: u32,
-    unhealthy_threshold: u32,
+    pub timeout: u64,
+    pub healthy_threshold: u32,
+    pub unhealthy_threshold: u32,
 }
 
 impl Default for HealthCheckConfig {
@@ -58,7 +58,7 @@ impl Default for HealthCheckConfig {
             path: String::from("/health"),
             interval: 5,
             timeout: 3,
-            health_threshold: 3,
+            healthy_threshold: 3,
             unhealthy_threshold: 3,
         }
     }
@@ -176,7 +176,7 @@ mod tests {
             path = "/health"
             interval = 10
             timeout = 5
-            health_threshold = 3
+            healthy_threshold = 3
             unhealthy_threshold = 3
 
             [timeouts]
@@ -205,7 +205,7 @@ mod tests {
                 path: String::from("/health"),
                 interval: 10,
                 timeout: 5,
-                health_threshold: 3,
+                healthy_threshold: 3,
                 unhealthy_threshold: 3,
             },
             timeouts: TimeoutConfig {
