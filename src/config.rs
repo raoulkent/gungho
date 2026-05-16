@@ -392,8 +392,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let config_path = temp_dir.path().join("bad.toml");
 
-        std::fs::write(&config_path, "this is [[[not valid toml")
-            .expect("failed to write file");
+        std::fs::write(&config_path, "this is [[[not valid toml").expect("failed to write file");
 
         let result = Config::from_file(&config_path);
 
