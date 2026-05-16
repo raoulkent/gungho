@@ -92,7 +92,7 @@ impl Proxy {
 
             tokio::spawn(async move {
                 if let Err(e) = connection.await {
-                    eprintln!("Connection error: {e}");
+                    tracing::error!("Connection error: {e}");
                 }
             });
         }
