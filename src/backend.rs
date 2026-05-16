@@ -29,10 +29,6 @@ impl Backend {
         self.weight
     }
 
-    pub const fn set_weight(&mut self, weight: u32) {
-        self.weight = weight;
-    }
-
     pub fn get_health(&self) -> bool {
         self.healthy.load(Ordering::SeqCst)
     }
