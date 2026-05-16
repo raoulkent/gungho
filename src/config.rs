@@ -380,9 +380,8 @@ mod tests {
     fn test_from_file_returns_io_error_for_missing_file() {
         let result = Config::from_file("/nonexistent/path/config.toml");
 
-        assert!(result.is_err());
         assert!(
-            matches!(result.unwrap_err(), ConfigError::Io(_)),
+            matches!(result, Err(ConfigError::Io(_))),
             "Expected ConfigError::Io for missing file"
         );
     }
@@ -396,9 +395,8 @@ mod tests {
 
         let result = Config::from_file(&config_path);
 
-        assert!(result.is_err());
         assert!(
-            matches!(result.unwrap_err(), ConfigError::Parse(_)),
+            matches!(result, Err(ConfigError::Parse(_))),
             "Expected ConfigError::Parse for invalid TOML"
         );
     }
@@ -413,11 +411,10 @@ mod tests {
 
         let result = Config::from_file(&config_path);
 
-        assert!(result.is_err());
         assert!(
             matches!(
-                result.unwrap_err(),
-                ConfigError::Validation(ConfigValidationError::ZeroBackends)
+                result,
+                Err(ConfigError::Validation(ConfigValidationError::ZeroBackends))
             ),
             "Expected ConfigError::Validation(ZeroBackends)"
         );
