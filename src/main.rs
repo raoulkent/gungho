@@ -13,6 +13,8 @@ mod metrics;
 #[allow(dead_code)]
 mod proxy;
 
+mod health;
+
 fn main() {
     println!("Hello, world!");
 }
