@@ -13,6 +13,7 @@ mod metrics;
 #[allow(dead_code)]
 mod proxy;
 
+#[allow(dead_code)]
 mod health;
 
 fn main() {

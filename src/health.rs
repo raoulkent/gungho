@@ -38,7 +38,7 @@ impl BackendStatus {
     }
 }
 
-pub(crate) struct HealthChecker {
+pub struct HealthChecker {
     config: HealthCheckConfig,
     pool: Arc<BackendPool>,
     metrics: Arc<GunghoMetrics>,
@@ -71,7 +71,7 @@ impl HealthChecker {
 
         loop {
             tokio::select! {
-                _ = self.cancellation_token.cancelled() => break,
+                () = self.cancellation_token.cancelled() => break,
                 _ = interval.tick() => {
                     let mut set: JoinSet<(SocketAddr, HealthCheckResult)> = JoinSet::new();
                     for backend in self.pool.all_backends() {
@@ -341,15 +341,16 @@ mod tests {
             Arc::new(GunghoMetrics::new()),
             token.clone(),
         );
-        tokio::spawn(checker.run());
+        let handle = tokio::spawn(checker.run());
         // Wait enough ticks for thresholds to matter
         tokio::time::sleep(Duration::from_secs(2)).await;
         assert_eq!(pool.get_health_by_addr(addr), Some(true));
 
+        token.cancel();
+        handle.await.expect("Health checker task panicked");
+
         *status_code.lock().expect("Could not lock status code") =
             StatusCode::INTERNAL_SERVER_ERROR;
-        token.cancel();
-        tokio::time::sleep(Duration::from_millis(20)).await;
         assert_eq!(pool.get_health_by_addr(addr), Some(true));
     }
 }
