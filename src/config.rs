@@ -14,6 +14,16 @@ pub enum ConfigValidationError {
     InvalidAddrs,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum ConfigError {
+    #[error("failed to read config file: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("failed to parse config: {0}")]
+    Parse(#[from] toml::de::Error),
+    #[error("config validation failed: {0}")]
+    Validation(#[from] ConfigValidationError),
+}
+
 // --- Supporting types ---
 
 #[derive(Deserialize, PartialEq, Eq, Debug, Default)]
@@ -69,9 +79,9 @@ impl Default for HealthCheckConfig {
 #[serde(default)]
 /// Timeouts for backend connections in seconds
 pub struct TimeoutConfig {
-    connect: u64,
-    read: u64,
-    write: u64,
+    pub connect: u64,
+    pub read: u64,
+    pub write: u64,
 }
 
 impl Default for TimeoutConfig {
@@ -127,7 +137,7 @@ impl Config {
         Ok(())
     }
 
-    pub fn from_file(path: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_file(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let contents = std::fs::read_to_string(path)?;
         let config: Self = toml::from_str(&contents)?;
         config.validate()?;
@@ -240,6 +250,25 @@ mod tests {
     }
 
     #[test]
+    fn test_timeout_config_fields_accessible() {
+        let config_str = r#"
+            [[backends]]
+            addr = "127.0.0.1:3000"
+
+            [timeouts]
+            connect = 10
+            read = 60
+            write = 45
+        "#;
+
+        let config = toml::from_str::<Config>(config_str).expect("failed to read config");
+
+        assert_eq!(config.timeouts.connect, 10);
+        assert_eq!(config.timeouts.read, 60);
+        assert_eq!(config.timeouts.write, 45);
+    }
+
+    #[test]
     fn test_reject_zero_backends() {
         let config_str = "";
 
@@ -345,5 +374,49 @@ mod tests {
         };
 
         assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn test_from_file_returns_io_error_for_missing_file() {
+        let result = Config::from_file("/nonexistent/path/config.toml");
+
+        assert!(
+            matches!(result, Err(ConfigError::Io(_))),
+            "Expected ConfigError::Io for missing file"
+        );
+    }
+
+    #[test]
+    fn test_from_file_returns_parse_error_for_invalid_toml() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let config_path = temp_dir.path().join("bad.toml");
+
+        std::fs::write(&config_path, "this is [[[not valid toml").expect("failed to write file");
+
+        let result = Config::from_file(&config_path);
+
+        assert!(
+            matches!(result, Err(ConfigError::Parse(_))),
+            "Expected ConfigError::Parse for invalid TOML"
+        );
+    }
+
+    #[test]
+    fn test_from_file_returns_validation_error_for_invalid_config() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let config_path = temp_dir.path().join("empty.toml");
+
+        // Valid TOML but no backends — triggers ZeroBackends validation
+        std::fs::write(&config_path, "").expect("failed to write file");
+
+        let result = Config::from_file(&config_path);
+
+        assert!(
+            matches!(
+                result,
+                Err(ConfigError::Validation(ConfigValidationError::ZeroBackends))
+            ),
+            "Expected ConfigError::Validation(ZeroBackends)"
+        );
     }
 }
