@@ -17,6 +17,7 @@ use crate::lb::LoadBalancingStrategy;
 use crate::metrics::GunghoMetrics;
 
 use std::convert::Infallible;
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -52,33 +53,33 @@ impl Proxy {
         algorithm: Algorithm,
         addr: &str,
         timeout: Duration,
-    ) -> Self {
+    ) -> io::Result<Self> {
         let strategy = Arc::from(lb::create_strategy(&algorithm));
         let metrics = Arc::from(GunghoMetrics::new());
-        let listener = TcpListener::bind(addr)
-            .await
-            .expect("Failed to bind to address");
+        let listener = TcpListener::bind(addr).await?;
         let client = Client::builder(hyper_util::rt::TokioExecutor::new()).build_http();
 
-        Self {
+        Ok(Self {
             listener,
             pool,
             strategy,
             timeout,
             metrics,
             client,
-        }
+        })
     }
     pub async fn run(self) {
         let http = hyper::server::conn::http1::Builder::new();
         let this = Arc::new(self);
 
         loop {
-            let (stream, client_addr) = this
-                .listener
-                .accept()
-                .await
-                .expect("Failed to accept connection");
+            let (stream, client_addr) = match this.listener.accept().await {
+                Ok(conn) => conn,
+                Err(e) => {
+                    tracing::error!("Failed to accept connection: {e}");
+                    continue;
+                }
+            };
 
             let this = Arc::clone(&this);
 
@@ -255,7 +256,9 @@ mod tests {
         proxy_timeout: Option<Duration>,
     ) -> String {
         let timeout = proxy_timeout.unwrap_or(Duration::from_secs(5));
-        let proxy = Proxy::new(pool, algorithm, "127.0.0.1:0", timeout).await;
+        let proxy = Proxy::new(pool, algorithm, "127.0.0.1:0", timeout)
+            .await
+            .expect("Failed to bind proxy");
         let port = proxy.addr().port();
         tokio::spawn(async move {
             proxy.run().await;
@@ -492,5 +495,43 @@ mod tests {
 
         let resp = request_handle.await.expect("Task panicked");
         assert_eq!(resp.status(), reqwest::StatusCode::GATEWAY_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn test_proxy_new_returns_error_on_invalid_bind() {
+        let pool = Arc::new(setup_pool(&three_backends()));
+        let result = Proxy::new(
+            pool,
+            Algorithm::RoundRobin,
+            "invalid-not-an-addr",
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_proxy_new_returns_error_on_port_conflict() {
+        let pool = Arc::new(setup_pool(&three_backends()));
+        let first = Proxy::new(
+            pool.clone(),
+            Algorithm::RoundRobin,
+            "127.0.0.1:0",
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("First bind should succeed");
+
+        let occupied_addr = format!("127.0.0.1:{}", first.addr().port());
+        let result = Proxy::new(
+            pool,
+            Algorithm::RoundRobin,
+            &occupied_addr,
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert!(result.is_err());
     }
 }
