@@ -30,19 +30,19 @@ impl Backend {
     }
 
     pub fn get_health(&self) -> bool {
-        self.healthy.load(Ordering::SeqCst)
+        self.healthy.load(Ordering::Acquire)
     }
 
     pub fn get_active_connections(&self) -> usize {
-        self.active_connections.load(Ordering::SeqCst)
+        self.active_connections.load(Ordering::Relaxed)
     }
 
     pub fn increment_connections(&self) {
-        self.active_connections.fetch_add(1, Ordering::SeqCst);
+        self.active_connections.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn decrement_connections(&self) {
-        self.active_connections.fetch_sub(1, Ordering::SeqCst);
+        self.active_connections.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -82,13 +82,13 @@ impl BackendPool {
         self.backends
             .iter()
             .find(|b| b.addr == addr)
-            .map(|b| b.healthy.load(Ordering::SeqCst))
+            .map(|b| b.healthy.load(Ordering::Acquire))
     }
 
     pub fn healthy_backends(&self) -> Vec<Arc<Backend>> {
         self.backends
             .iter()
-            .filter(|b| b.healthy.load(Ordering::SeqCst))
+            .filter(|b| b.healthy.load(Ordering::Acquire))
             .cloned()
             .collect()
     }
@@ -97,7 +97,7 @@ impl BackendPool {
         self.backends
             .get(index)?
             .healthy
-            .store(true, Ordering::SeqCst);
+            .store(true, Ordering::Release);
 
         Some(())
     }
@@ -106,7 +106,7 @@ impl BackendPool {
         self.backends
             .get(index)?
             .healthy
-            .store(false, Ordering::SeqCst);
+            .store(false, Ordering::Release);
 
         Some(())
     }
@@ -116,7 +116,7 @@ impl BackendPool {
             .iter()
             .find(|b| b.addr == addr)?
             .healthy
-            .store(true, Ordering::SeqCst);
+            .store(true, Ordering::Release);
 
         Some(())
     }
@@ -126,7 +126,7 @@ impl BackendPool {
             .iter()
             .find(|b| b.addr == addr)?
             .healthy
-            .store(false, Ordering::SeqCst);
+            .store(false, Ordering::Release);
 
         Some(())
     }
@@ -231,11 +231,11 @@ mod tests {
 
         pool.mark_unhealthy(1);
 
-        assert_eq!(pool.backends[1].healthy.load(Ordering::SeqCst), false);
+        assert_eq!(pool.backends[1].healthy.load(Ordering::Acquire), false);
 
         pool.mark_healthy(1);
 
-        assert_eq!(pool.backends[1].healthy.load(Ordering::SeqCst), true);
+        assert_eq!(pool.backends[1].healthy.load(Ordering::Acquire), true);
     }
 
     #[test]
@@ -254,11 +254,11 @@ mod tests {
         let pool = BackendPool::from_config(&backends).expect("BackendPool ");
 
         assert_eq!(
-            pool.backends[0].active_connections.load(Ordering::SeqCst),
+            pool.backends[0].active_connections.load(Ordering::Relaxed),
             0
         );
         assert_eq!(
-            pool.backends[1].active_connections.load(Ordering::SeqCst),
+            pool.backends[1].active_connections.load(Ordering::Relaxed),
             0,
         );
 
@@ -267,7 +267,7 @@ mod tests {
         }
 
         assert_eq!(
-            pool.backends[1].active_connections.load(Ordering::SeqCst),
+            pool.backends[1].active_connections.load(Ordering::Relaxed),
             13
         );
 
@@ -276,7 +276,7 @@ mod tests {
         }
 
         assert_eq!(
-            pool.backends[1].active_connections.load(Ordering::SeqCst),
+            pool.backends[1].active_connections.load(Ordering::Relaxed),
             6
         );
     }
