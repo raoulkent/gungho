@@ -1,8 +1,8 @@
 use crate::config::BackendConfig;
 use std::net::{AddrParseError, SocketAddr};
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::{Arc, RwLock};
 
 pub struct Backend {
     addr: SocketAddr,
@@ -46,8 +46,11 @@ impl Backend {
     }
 }
 
+type HealthyCache = Arc<Vec<Arc<Backend>>>;
+
 pub struct BackendPool {
     backends: Vec<Arc<Backend>>,
+    healthy_cache: RwLock<HealthyCache>,
 }
 
 #[derive(Debug, thiserror::Error, Eq, PartialEq)]
@@ -69,8 +72,12 @@ impl BackendPool {
             .map(Backend::from_config)
             .collect::<Result<Vec<_>, _>>()?;
 
+        let backends: Vec<Arc<Backend>> = backends.into_iter().map(Arc::new).collect();
+        let healthy_cache = RwLock::new(Arc::new(backends.clone()));
+
         Ok(Self {
-            backends: backends.into_iter().map(Arc::new).collect(),
+            backends,
+            healthy_cache,
         })
     }
 
@@ -85,12 +92,24 @@ impl BackendPool {
             .map(|b| b.healthy.load(Ordering::Acquire))
     }
 
-    pub fn healthy_backends(&self) -> Vec<Arc<Backend>> {
-        self.backends
+    pub fn healthy_backends(&self) -> Arc<Vec<Arc<Backend>>> {
+        self.healthy_cache
+            .read()
+            .expect("healthy_cache lock poisoned")
+            .clone()
+    }
+
+    fn rebuild_healthy_cache(&self) {
+        let healthy: Vec<Arc<Backend>> = self
+            .backends
             .iter()
-            .filter(|b| b.healthy.load(Ordering::Acquire))
+            .filter(|b| b.get_health())
             .cloned()
-            .collect()
+            .collect();
+        *self
+            .healthy_cache
+            .write()
+            .expect("healthy_cache lock poisoned") = Arc::new(healthy);
     }
 
     pub(crate) fn mark_healthy(&self, index: usize) -> Option<()> {
@@ -98,6 +117,7 @@ impl BackendPool {
             .get(index)?
             .healthy
             .store(true, Ordering::Release);
+        self.rebuild_healthy_cache();
 
         Some(())
     }
@@ -107,6 +127,7 @@ impl BackendPool {
             .get(index)?
             .healthy
             .store(false, Ordering::Release);
+        self.rebuild_healthy_cache();
 
         Some(())
     }
@@ -117,6 +138,7 @@ impl BackendPool {
             .find(|b| b.addr == addr)?
             .healthy
             .store(true, Ordering::Release);
+        self.rebuild_healthy_cache();
 
         Some(())
     }
@@ -127,6 +149,7 @@ impl BackendPool {
             .find(|b| b.addr == addr)?
             .healthy
             .store(false, Ordering::Release);
+        self.rebuild_healthy_cache();
 
         Some(())
     }
