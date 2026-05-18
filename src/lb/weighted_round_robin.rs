@@ -1,29 +1,26 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicI64;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, OnceLock};
 
 use crate::backend::Backend;
 use crate::lb::LoadBalancingStrategy;
 
-#[derive(Debug)]
 pub struct WeightedRoundRobin {
-    credits: Mutex<HashMap<SocketAddr, i64>>,
+    credits: OnceLock<Vec<AtomicI64>>,
+}
+
+impl std::fmt::Debug for WeightedRoundRobin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WeightedRoundRobin").finish()
+    }
 }
 
 impl WeightedRoundRobin {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            credits: Mutex::new(HashMap::new()),
+            credits: OnceLock::new(),
         }
-    }
-
-    pub fn adjust_credits(&self, backend: &Backend, delta: i64) {
-        *self
-            .credits
-            .lock()
-            .expect("Failed to acquire lock on credits HashMap")
-            .entry(backend.get_addr())
-            .or_insert(0) += delta;
     }
 }
 
@@ -45,10 +42,9 @@ impl LoadBalancingStrategy for WeightedRoundRobin {
             return None;
         }
 
-        let mut credits = self
+        let credits = self
             .credits
-            .lock()
-            .expect("Failed to acquire lock on credits HashMap");
+            .get_or_init(|| (0..backends.len()).map(|_| AtomicI64::new(0)).collect());
 
         let mut total_weight: i64 = 0;
         let mut best_index = 0;
@@ -57,19 +53,18 @@ impl LoadBalancingStrategy for WeightedRoundRobin {
         for (i, backend) in backends.iter().enumerate() {
             let w = i64::from(backend.get_weight());
             total_weight += w;
-            let credit = credits.entry(backend.get_addr()).or_insert(0);
-            *credit += w;
-            if *credit > best_credit {
-                best_credit = *credit;
+            let credit = &credits[i];
+            credit.fetch_add(w, Ordering::Relaxed);
+            if credit.load(Ordering::Relaxed) > best_credit {
+                best_credit = credit.load(Ordering::Relaxed);
                 best_index = i;
             }
         }
         // Subtract total_weight from the winner
-        if let Some(winner_credit) = credits.get_mut(&backends[best_index].get_addr()) {
-            *winner_credit -= total_weight;
+        if let Some(winner_credit) = credits.get(best_index) {
+            winner_credit.fetch_sub(total_weight, Ordering::Relaxed);
         }
 
-        drop(credits); // Explicitly drop the lock before returning
         Some(best_index)
     }
 
