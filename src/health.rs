@@ -1,6 +1,7 @@
 use crate::backend::BackendPool;
 use crate::config::HealthCheckConfig;
 use crate::metrics::GunghoMetrics;
+use std::collections::HashSet;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -110,6 +111,10 @@ impl HealthChecker {
                             self.metrics.set_backend_health(&addr.to_string(), true);
                         }
                     }
+
+                    // Prune status_map
+                    let addrs: HashSet<SocketAddr> = self.pool.all_backends().iter().map(|b| b.get_addr()).collect();
+                    status_map.retain(|addr, _| addrs.contains(addr));
                 }
             }
         }
