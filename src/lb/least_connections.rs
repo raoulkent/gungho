@@ -13,6 +13,12 @@ impl LeastConnections {
     }
 }
 
+impl Default for LeastConnections {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoadBalancingStrategy for LeastConnections {
     fn select(
         &self,

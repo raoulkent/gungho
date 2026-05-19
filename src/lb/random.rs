@@ -13,6 +13,12 @@ impl Random {
     }
 }
 
+impl Default for Random {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoadBalancingStrategy for Random {
     fn select(
         &self,
