@@ -31,6 +31,12 @@ impl IpHash {
     }
 }
 
+impl Default for IpHash {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoadBalancingStrategy for IpHash {
     fn select(&self, backends: &[Arc<Backend>], client_addr: Option<&SocketAddr>) -> Option<usize> {
         if backends.is_empty() {

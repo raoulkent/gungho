@@ -16,14 +16,11 @@ impl WeightedRoundRobin {
             credits: Mutex::new(HashMap::new()),
         }
     }
+}
 
-    pub fn adjust_credits(&self, backend: &Backend, delta: i64) {
-        *self
-            .credits
-            .lock()
-            .expect("Failed to acquire lock on credits HashMap")
-            .entry(backend.get_addr())
-            .or_insert(0) += delta;
+impl Default for WeightedRoundRobin {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

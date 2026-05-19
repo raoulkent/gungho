@@ -18,6 +18,12 @@ impl RoundRobin {
     }
 }
 
+impl Default for RoundRobin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoadBalancingStrategy for RoundRobin {
     fn select(
         &self,
