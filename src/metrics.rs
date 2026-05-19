@@ -19,6 +19,12 @@ pub enum ReloadResult {
     Failure,
 }
 
+impl Default for GunghoMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GunghoMetrics {
     pub fn new() -> Self {
         // Create a new Prometheus registry

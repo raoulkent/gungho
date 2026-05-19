@@ -24,6 +24,12 @@ impl WeightedRoundRobin {
     }
 }
 
+impl Default for WeightedRoundRobin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Selects a backend using the Smooth Weighted Round Robin (SWRR) algorithm.
 ///
 /// On each call:
