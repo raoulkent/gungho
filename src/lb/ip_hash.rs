@@ -1,5 +1,3 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -13,6 +11,24 @@ impl IpHash {
     pub const fn new() -> Self {
         Self
     }
+
+    // Nginx' default hash function
+    fn hash_ip(addr: &SocketAddr) -> usize {
+        let mut hash: usize = 89;
+        match addr.ip() {
+            std::net::IpAddr::V4(ip) => {
+                for &byte in &ip.octets() {
+                    hash = (hash * 113 + byte as usize) % 6271;
+                }
+            }
+            std::net::IpAddr::V6(ip) => {
+                for &byte in &ip.octets() {
+                    hash = (hash * 113 + byte as usize) % 6271;
+                }
+            }
+        }
+        hash
+    }
 }
 
 impl LoadBalancingStrategy for IpHash {
@@ -21,15 +37,7 @@ impl LoadBalancingStrategy for IpHash {
             return None;
         }
 
-        let index = client_addr.map_or(0, |addr| {
-            let mut hasher = DefaultHasher::new();
-            addr.ip().hash(&mut hasher);
-
-            #[allow(clippy::cast_possible_truncation)]
-            let index = hasher.finish() as usize % backends.len();
-
-            index
-        });
+        let index = client_addr.map_or(0, |addr| Self::hash_ip(addr) % backends.len());
 
         Some(index)
     }
