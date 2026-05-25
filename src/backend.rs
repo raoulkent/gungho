@@ -53,6 +53,15 @@ pub struct BackendPool {
     healthy_cache: RwLock<HealthyCache>,
 }
 
+impl Default for BackendPool {
+    fn default() -> Self {
+        Self {
+            backends: vec![],
+            healthy_cache: RwLock::new(Arc::new(vec![])),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error, Eq, PartialEq)]
 pub enum BackendPoolError {
     #[error("No backends configured")]
@@ -62,6 +71,16 @@ pub enum BackendPoolError {
 }
 
 impl BackendPool {
+    pub(crate) fn new(backends: Vec<Arc<Backend>>) -> Self {
+        let healthy_cache = RwLock::new(Arc::new(
+            backends.iter().filter(|b| b.get_health()).cloned().collect(),
+        ));
+        Self {
+            backends,
+            healthy_cache,
+        }
+    }
+
     pub fn from_config(backends: &[BackendConfig]) -> Result<Self, BackendPoolError> {
         if backends.is_empty() {
             return Err(BackendPoolError::NoBackends);
