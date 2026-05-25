@@ -11,7 +11,26 @@ pub struct Backend {
     active_connections: AtomicUsize,
 }
 
+impl Default for Backend {
+    fn default() -> Self {
+        Self::new(
+            "127.0.0.1:0"
+                .parse()
+                .expect("Could not parse default SocketAddr"),
+        )
+    }
+}
+
 impl Backend {
+    pub(crate) const fn new(addr: SocketAddr) -> Self {
+        Self {
+            addr,
+            weight: 1,
+            healthy: AtomicBool::new(true),
+            active_connections: AtomicUsize::new(0),
+        }
+    }
+
     pub fn from_config(config: &BackendConfig) -> Result<Self, AddrParseError> {
         Ok(Self {
             addr: config.addr.parse::<std::net::SocketAddr>()?,
@@ -31,6 +50,10 @@ impl Backend {
 
     pub fn get_health(&self) -> bool {
         self.healthy.load(Ordering::Acquire)
+    }
+
+    pub fn set_health(&self, healthy: bool) {
+        self.healthy.store(healthy, Ordering::SeqCst);
     }
 
     pub fn get_active_connections(&self) -> usize {
