@@ -37,6 +37,12 @@ impl Admin {
         })
     }
 
+    fn local_addr(&self) -> SocketAddr {
+        self.listener
+            .local_addr()
+            .expect("Could not get local_addr")
+    }
+
     async fn run(self) {
         let http: Arc<Builder> = Arc::new(Builder::new());
         let this = Arc::new(self);
@@ -128,18 +134,115 @@ impl Admin {
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
-    async fn test_livez_always_200() {}
+    use super::*;
+    use crate::backend::{Backend, BackendPool};
+
+    async fn spawn_admin_server(pool: Arc<BackendPool>) -> (CancellationToken, SocketAddr) {
+        let metrics = Arc::from(GunghoMetrics::new());
+        let listener_addr: SocketAddr = "127.0.0.1:0".parse().expect("Failed to parse address");
+        let cancellation_token = CancellationToken::new();
+
+        let admin = Admin::new(metrics, pool, listener_addr, cancellation_token.clone())
+            .await
+            .expect("Could not create new Admin");
+        let addr = admin.local_addr();
+
+        tokio::spawn(admin.run());
+
+        (cancellation_token, addr)
+    }
 
     #[tokio::test]
-    async fn test_readyz_healthy() {}
+    async fn test_livez_always_200() {
+        let pool = Arc::new(BackendPool::default());
+        let (_cancellation_token, addr) = spawn_admin_server(pool).await;
+
+        let resp = reqwest::get(format!("http://{addr}/livez"))
+            .await
+            .expect("Request failed");
+
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        assert_eq!(
+            resp.text().await.expect("Failed to read response"),
+            r#"{"status": "ok"}"#
+        );
+    }
 
     #[tokio::test]
-    async fn test_readyz_all_unhealthy() {}
+    async fn test_readyz_healthy() {
+        let addr: SocketAddr = "127.0.0.1:0".parse().expect("Failed to parse address");
+        let backend: Arc<Backend> = Arc::new(Backend::new(addr));
+        let backends = vec![backend];
+        let pool = Arc::new(BackendPool::new(backends));
+        let (_cancellation_token, addr) = spawn_admin_server(pool).await;
+
+        let resp = reqwest::get(format!("http://{addr}/readyz"))
+            .await
+            .expect("Could not get readyz response");
+
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        assert_eq!(
+            resp.text().await.expect("Failed to read response"),
+            r#"{"status": "ok", "healthy_backends": 1}"#
+        );
+    }
 
     #[tokio::test]
-    async fn test_metrics_endpoint() {}
+    async fn test_readyz_all_unhealthy() {
+        let addr: SocketAddr = "127.0.0.1:0".parse().expect("Failed to parse address");
+        let backend: Arc<Backend> = Arc::new(Backend::new(addr));
+        backend.set_health(false);
+        let backends = vec![backend];
+        let pool = Arc::new(BackendPool::new(backends));
+        let (_cancellation_token, addr) = spawn_admin_server(pool).await;
+
+        let resp = reqwest::get(format!("http://{addr}/readyz"))
+            .await
+            .expect("Could not get readyz response");
+
+        assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            resp.text().await.expect("Failed to read response"),
+            r#"{"status": "not ready", "healthy_backends": 0}"#
+        );
+    }
 
     #[tokio::test]
-    async fn test_unknown_path_404() {}
+    async fn test_metrics_endpoint() {
+        let pool = Arc::new(BackendPool::default());
+        let (_cancellation_token, addr) = spawn_admin_server(pool).await;
+
+        let resp = reqwest::get(format!("http://{addr}/metrics"))
+            .await
+            .expect("Request failed");
+        let headers = resp.headers().clone();
+        let body = resp.text().await.expect("Failed to read response");
+
+        assert_eq!(
+            headers
+                .get("content-type")
+                .expect("Could not get content type"),
+            "text/plain; version=0.0.4; charset=utf-8"
+        );
+        assert!(body.contains("# HELP"));
+        assert!(body.contains("# TYPE"));
+        assert!(body.contains("gungho_active_connections 0"));
+        assert!(body.contains("gungho_backends_total 0"));
+    }
+
+    #[tokio::test]
+    async fn test_unknown_path_404() {
+        let pool = Arc::new(BackendPool::default());
+        let (_cancellation_token, addr) = spawn_admin_server(pool).await;
+
+        let resp = reqwest::get(format!("http://{addr}/foo/bar/spam-eggs"))
+            .await
+            .expect("Request failed");
+
+        assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+        assert_eq!(
+            resp.text().await.expect("Failed to read response"),
+            r#"{"status": "could not be found"}"#
+        );
+    }
 }

@@ -96,7 +96,11 @@ pub enum BackendPoolError {
 impl BackendPool {
     pub(crate) fn new(backends: Vec<Arc<Backend>>) -> Self {
         let healthy_cache = RwLock::new(Arc::new(
-            backends.iter().filter(|b| b.get_health()).cloned().collect(),
+            backends
+                .iter()
+                .filter(|b| b.get_health())
+                .cloned()
+                .collect(),
         ));
         Self {
             backends,
