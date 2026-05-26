@@ -16,6 +16,9 @@ mod proxy;
 #[allow(dead_code)]
 mod health;
 
+#[allow(dead_code)]
+mod admin;
+
 fn main() {
     println!("Hello, world!");
 }

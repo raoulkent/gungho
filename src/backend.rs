@@ -11,7 +11,26 @@ pub struct Backend {
     active_connections: AtomicUsize,
 }
 
+impl Default for Backend {
+    fn default() -> Self {
+        Self::new(
+            "127.0.0.1:0"
+                .parse()
+                .expect("Could not parse default SocketAddr"),
+        )
+    }
+}
+
 impl Backend {
+    pub(crate) const fn new(addr: SocketAddr) -> Self {
+        Self {
+            addr,
+            weight: 1,
+            healthy: AtomicBool::new(true),
+            active_connections: AtomicUsize::new(0),
+        }
+    }
+
     pub fn from_config(config: &BackendConfig) -> Result<Self, AddrParseError> {
         Ok(Self {
             addr: config.addr.parse::<std::net::SocketAddr>()?,
@@ -31,6 +50,10 @@ impl Backend {
 
     pub fn get_health(&self) -> bool {
         self.healthy.load(Ordering::Acquire)
+    }
+
+    pub fn set_health(&self, healthy: bool) {
+        self.healthy.store(healthy, Ordering::SeqCst);
     }
 
     pub fn get_active_connections(&self) -> usize {
@@ -53,6 +76,15 @@ pub struct BackendPool {
     healthy_cache: RwLock<HealthyCache>,
 }
 
+impl Default for BackendPool {
+    fn default() -> Self {
+        Self {
+            backends: vec![],
+            healthy_cache: RwLock::new(Arc::new(vec![])),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error, Eq, PartialEq)]
 pub enum BackendPoolError {
     #[error("No backends configured")]
@@ -62,6 +94,20 @@ pub enum BackendPoolError {
 }
 
 impl BackendPool {
+    pub(crate) fn new(backends: Vec<Arc<Backend>>) -> Self {
+        let healthy_cache = RwLock::new(Arc::new(
+            backends
+                .iter()
+                .filter(|b| b.get_health())
+                .cloned()
+                .collect(),
+        ));
+        Self {
+            backends,
+            healthy_cache,
+        }
+    }
+
     pub fn from_config(backends: &[BackendConfig]) -> Result<Self, BackendPoolError> {
         if backends.is_empty() {
             return Err(BackendPoolError::NoBackends);
