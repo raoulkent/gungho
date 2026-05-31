@@ -1,6 +1,5 @@
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicI64;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use crate::backend::Backend;

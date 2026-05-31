@@ -3,10 +3,9 @@ use http_body_util::{Either, Full};
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 
-use hyper::StatusCode;
 use hyper::body::Incoming;
 use hyper::http::header::HeaderValue;
-use hyper::{HeaderMap, Request, Response};
+use hyper::{HeaderMap, Request, Response, StatusCode};
 use tokio::net::TcpListener;
 use tokio::time::{Duration, timeout};
 

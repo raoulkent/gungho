@@ -1,7 +1,6 @@
 use crate::config::BackendConfig;
 use std::net::{AddrParseError, SocketAddr};
-use std::sync::atomic::Ordering;
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 pub struct Backend {
