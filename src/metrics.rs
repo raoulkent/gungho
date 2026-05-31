@@ -1,6 +1,7 @@
 use hyper::StatusCode;
-use prometheus::{HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry};
-use prometheus::{histogram_opts, opts};
+use prometheus::{
+    HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry, histogram_opts, opts,
+};
 
 #[derive(Debug)]
 pub struct GunghoMetrics {
