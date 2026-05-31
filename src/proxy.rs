@@ -5,7 +5,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 
 use hyper::body::Incoming;
 use hyper::http::header::HeaderValue;
-use hyper::{HeaderMap, Request, Response, StatusCode};
+use hyper::{HeaderMap, Request, Response, StatusCode, Uri};
 use tokio::net::TcpListener;
 use tokio::time::{Duration, timeout};
 
@@ -172,9 +172,14 @@ impl Proxy {
         let backend_addr = backend.get_addr();
 
         let path_and_query = req.uri().path_and_query().map_or("/", |pq| pq.as_str());
-        *req.uri_mut() = format!("http://{backend_addr}{path_and_query}")
-            .parse()
-            .expect("Failed to parse URI");
+
+        let Ok(uri) = format!("http://{backend_addr}{path_and_query}").parse::<Uri>() else {
+            return Ok(Self::build_error_response(
+                StatusCode::BAD_REQUEST,
+                b"Bad Request",
+            ));
+        };
+        *req.uri_mut() = uri;
 
         Self::insert_x_forwarded_headers(req.headers_mut(), client_addr, backend_addr);
 
