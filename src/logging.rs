@@ -2,7 +2,8 @@ use serde::Deserialize;
 
 use std::env::{VarError, var};
 use tracing::Subscriber;
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::{EnvFilter, fmt};
 
 const DEFAULT_LOG_LEVEL: &str = "debug";
 
