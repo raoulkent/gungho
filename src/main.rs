@@ -1,3 +1,5 @@
+use tracing::info;
+
 #[allow(dead_code)]
 mod config;
 
@@ -19,6 +21,12 @@ mod health;
 #[allow(dead_code)]
 mod admin;
 
-fn main() {
-    println!("Hello, world!");
+#[allow(dead_code)]
+mod logging;
+
+fn main() -> anyhow::Result<()> {
+    logging::init_logging("info", logging::LogFormat::Pretty)?;
+    info!("Hello, world!");
+
+    Ok(())
 }
