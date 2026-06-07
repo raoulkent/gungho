@@ -44,14 +44,7 @@ fn build_filter(log_level: &str) -> anyhow::Result<EnvFilter> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn test_init_logging_does_not_panic() {}
-
-    #[test]
-    fn test_env_filter_parses() {}
-
-    #[test]
-    fn test_json_format_produces_json() {}
-
-    #[test]
-    fn test_structured_fields_present() {}
+    fn test_build_subscriber_doesnt_panic() {
+        let _ = super::build_subscriber("info", super::LogFormat::Pretty);
+    }
 }
