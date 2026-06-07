@@ -3,7 +3,10 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::path::Path;
 
+use crate::logging::LogFormat;
+
 // --- Error types ---
+
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
 pub enum ConfigValidationError {
     #[error("configuration must have at least one backend")]
@@ -107,6 +110,7 @@ pub struct Config {
     pub health_check: HealthCheckConfig,
     pub timeouts: TimeoutConfig,
     pub max_connections: u32,
+    pub log_format: LogFormat,
 }
 
 impl Config {
@@ -155,6 +159,7 @@ impl Default for Config {
             health_check: HealthCheckConfig::default(),
             timeouts: TimeoutConfig::default(),
             max_connections: 0, // 0 = unlimited
+            log_format: LogFormat::default(),
         }
     }
 }
@@ -224,6 +229,7 @@ mod tests {
                 write: 30,
             },
             max_connections: 1000,
+            log_format: LogFormat::Pretty,
         };
 
         assert_eq!(config.expect("failed to read config"), expected);

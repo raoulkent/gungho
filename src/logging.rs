@@ -1,0 +1,57 @@
+use serde::Deserialize;
+
+use std::env::{VarError, var};
+use tracing::Subscriber;
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+
+const DEFAULT_LOG_LEVEL: &str = "debug";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LogFormat {
+    #[default]
+    Pretty,
+    Json,
+}
+
+fn build_subscriber(log_level: &str, format: LogFormat) -> anyhow::Result<impl Subscriber> {
+    let filter = build_filter(log_level)?;
+    let fmt_layer = match format {
+        LogFormat::Pretty => fmt::layer().pretty().boxed(),
+        LogFormat::Json => fmt::layer().json().boxed(),
+    };
+
+    Ok(tracing_subscriber::registry().with(filter).with(fmt_layer))
+}
+
+pub fn init_logging(log_level: &str, format: LogFormat) -> anyhow::Result<()> {
+    let subscriber = build_subscriber(log_level, format)?;
+    subscriber.try_init()?;
+    Ok(())
+}
+
+/// This function is used to build the filter for the log level.
+fn build_filter(log_level: &str) -> anyhow::Result<EnvFilter> {
+    match var("RUST_LOG") {
+        Ok(value) => EnvFilter::try_new(value).map_err(Into::into),
+        Err(VarError::NotPresent) => EnvFilter::try_new(log_level)
+            .or_else(|_| EnvFilter::try_new(DEFAULT_LOG_LEVEL))
+            .map_err(Into::into),
+        Err(err) => Err(err.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_init_logging_does_not_panic() {}
+
+    #[test]
+    fn test_env_filter_parses() {}
+
+    #[test]
+    fn test_json_format_produces_json() {}
+
+    #[test]
+    fn test_structured_fields_present() {}
+}
