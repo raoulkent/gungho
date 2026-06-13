@@ -98,47 +98,6 @@ impl Proxy {
         }
     }
 
-    fn insert_x_forwarded_headers(
-        header_map: &mut HeaderMap<HeaderValue>,
-        client_addr: SocketAddr,
-        backend_addr: SocketAddr,
-    ) {
-        // Add X-Forwarded-For, X-Forwarded-Host and X-Forwarded-Proto headers
-        header_map.insert(
-            "X-Forwarded-For",
-            client_addr.ip().to_string().parse().expect("Invalid IP"),
-        );
-        header_map.insert("X-Forwarded-Proto", "http".parse().expect("Invalid Scheme"));
-
-        let original_host = header_map.get("host").cloned();
-        header_map.insert(
-            "Host",
-            backend_addr.to_string().parse().expect("Invalid Host"),
-        );
-
-        if let Some(host) = original_host {
-            header_map.insert("X-Forwarded-Host", host);
-        }
-    }
-
-    fn strip_hop_by_hop_headers(header_map: &mut HeaderMap<HeaderValue>) {
-        // Remove hop-by-hop headers as per RFC 2616 Section 13.5.1
-        let hop_by_hop_headers = [
-            "Connection",
-            "Keep-Alive",
-            "Proxy-Authenticate",
-            "Proxy-Authorization",
-            "TE",
-            "Trailers",
-            "Transfer-Encoding",
-            "Upgrade",
-        ];
-
-        for header in &hop_by_hop_headers {
-            header_map.remove(*header);
-        }
-    }
-
     fn build_error_response(
         status: StatusCode,
         string: &'static [u8],
@@ -181,9 +140,9 @@ impl Proxy {
         };
         *req.uri_mut() = uri;
 
-        Self::insert_x_forwarded_headers(req.headers_mut(), client_addr, backend_addr);
+        insert_x_forwarded_headers(req.headers_mut(), client_addr, backend_addr);
 
-        Self::strip_hop_by_hop_headers(req.headers_mut());
+        strip_hop_by_hop_headers(req.headers_mut());
 
         let _guard = ConnectionGuard::new(Arc::clone(backend));
 
@@ -196,7 +155,7 @@ impl Proxy {
                     start.elapsed().as_secs_f64(),
                 );
 
-                Self::strip_hop_by_hop_headers(resp.headers_mut());
+                strip_hop_by_hop_headers(resp.headers_mut());
 
                 Ok(resp.map(Either::Left))
             }
@@ -227,6 +186,47 @@ impl Proxy {
         self.listener
             .local_addr()
             .expect("Failed to get local address")
+    }
+}
+
+fn insert_x_forwarded_headers(
+    header_map: &mut HeaderMap<HeaderValue>,
+    client_addr: SocketAddr,
+    backend_addr: SocketAddr,
+) {
+    // Add X-Forwarded-For, X-Forwarded-Host and X-Forwarded-Proto headers
+    header_map.insert(
+        "X-Forwarded-For",
+        client_addr.ip().to_string().parse().expect("Invalid IP"),
+    );
+    header_map.insert("X-Forwarded-Proto", "http".parse().expect("Invalid Scheme"));
+
+    let original_host = header_map.get("host").cloned();
+    header_map.insert(
+        "Host",
+        backend_addr.to_string().parse().expect("Invalid Host"),
+    );
+
+    if let Some(host) = original_host {
+        header_map.insert("X-Forwarded-Host", host);
+    }
+}
+
+fn strip_hop_by_hop_headers(header_map: &mut HeaderMap<HeaderValue>) {
+    // Remove hop-by-hop headers as per RFC 2616 Section 13.5.1
+    let hop_by_hop_headers = [
+        "Connection",
+        "Keep-Alive",
+        "Proxy-Authenticate",
+        "Proxy-Authorization",
+        "TE",
+        "Trailers",
+        "Transfer-Encoding",
+        "Upgrade",
+    ];
+
+    for header in &hop_by_hop_headers {
+        header_map.remove(*header);
     }
 }
 
