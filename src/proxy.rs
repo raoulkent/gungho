@@ -605,11 +605,23 @@ mod tests {
         assert!(request_data.contains("GET /?foo=bar HTTP/1.1"));
     }
 
-    #[tokio::test]
-    async fn test_strip_incomplete_otel_context() {}
+    #[test]
+    fn test_strip_incomplete_otel_context() {
+        let mut header_map = HeaderMap::new();
 
-    #[tokio::test]
-    async fn test_pass_otel_context() {}
+        header_map.insert(
+            "traceparent",
+            HeaderValue::from_static("00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01"),
+        );
+        header_map.insert("tracestate", HeaderValue::from_static("foo=bar"));
+        header_map.insert("baggage", HeaderValue::from_static("foo=bar"));
+
+        strip_incomplete_otel_context(&mut header_map);
+
+        assert!(!header_map.contains_key("traceparent"));
+        assert!(!header_map.contains_key("tracestate"));
+        assert!(!header_map.contains_key("baggage"));
+    }
 
     #[test]
     fn validate_traceparent_ok() {
@@ -667,5 +679,11 @@ mod tests {
     }
 
     #[test]
-    fn validate_traceparent_missing() {}
+    fn validate_traceparent_missing() {
+        let header_map = HeaderMap::new();
+
+        let result = validate_traceparent(&header_map);
+
+        assert!(!result);
+    }
 }
