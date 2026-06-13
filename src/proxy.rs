@@ -144,6 +144,8 @@ impl Proxy {
 
         strip_hop_by_hop_headers(req.headers_mut());
 
+        propagate_or_strip_otel_context(req.headers_mut());
+
         let _guard = ConnectionGuard::new(Arc::clone(backend));
 
         match timeout(self.timeout, self.client.request(req)).await {
@@ -265,6 +267,12 @@ fn strip_incomplete_otel_context(header_map: &mut HeaderMap<HeaderValue>) {
 
     for header in &otel_headers {
         header_map.remove(*header);
+    }
+}
+
+fn propagate_or_strip_otel_context(header_map: &mut HeaderMap<HeaderValue>) {
+    if !validate_traceparent(header_map) {
+        strip_incomplete_otel_context(header_map);
     }
 }
 
