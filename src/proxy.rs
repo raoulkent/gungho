@@ -230,6 +230,44 @@ impl Proxy {
     }
 }
 
+fn validate_traceparent(header_map: &HeaderMap<HeaderValue>) -> bool {
+    fn is_hex_digit_lowercase(s: &str) -> bool {
+        s.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
+    }
+
+    fn is_all_zeros(s: &str) -> bool {
+        s.chars().all(|c| c == '0')
+    }
+
+    let Some(traceparent) = header_map.get("traceparent") else {
+        return false;
+    };
+
+    let Ok(traceparent) = traceparent.to_str() else {
+        return false;
+    };
+    let parts: Vec<&str> = traceparent.split('-').collect();
+
+    parts.len() == 4
+        && parts[0] == "00"
+        && parts[1].len() == 32
+        && parts[2].len() == 16
+        && parts[3].len() == 2
+        && is_hex_digit_lowercase(parts[1])
+        && is_hex_digit_lowercase(parts[2])
+        && is_hex_digit_lowercase(parts[3])
+        && !is_all_zeros(parts[1])
+        && !is_all_zeros(parts[2])
+}
+
+fn strip_incomplete_otel_context(header_map: &mut HeaderMap<HeaderValue>) {
+    let otel_headers = ["traceparent", "tracestate", "baggage"];
+
+    for header in &otel_headers {
+        header_map.remove(*header);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,4 +596,68 @@ mod tests {
         assert_eq!(resp.text().await.expect("Failed to read response"), "hello");
         assert!(request_data.contains("GET /?foo=bar HTTP/1.1"));
     }
+
+    #[tokio::test]
+    async fn test_strip_incomplete_otel_context() {}
+
+    #[tokio::test]
+    async fn test_pass_otel_context() {}
+
+    #[test]
+    fn validate_traceparent_ok() {
+        let traceparent: &HeaderValue =
+            &HeaderValue::from_str("00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01")
+                .expect("Could not construct HeaderValue");
+
+        let mut header_map = HeaderMap::new();
+
+        header_map.insert("traceparent", traceparent.clone());
+
+        let result = validate_traceparent(&header_map);
+
+        assert!(result);
+    }
+
+    #[test]
+    fn validate_traceparent_malformed() {
+        // A set of invalid W3C TraceContext
+        let invalid_traceparent: Vec<&str> = vec![
+            // invalid length
+            "00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01-01",
+            // invalid version
+            "gg-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01",
+            // missing trace-id
+            "00-b9c7c989f97918e1-01",
+            // invalid trace-id
+            "00-abcdef0123456789abcdef0123456***-b9c7c989f97918e1-01",
+            // missing span-id
+            "00-abcdef0123456789abcdef0123456789-01",
+            // invalid span-id
+            "00-abcdef0123456789abcdef0123456789-b9c7c989f9791***-01",
+            // missing trace-options
+            "00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1",
+            // invalid trace-options
+            "00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-**",
+            // all zeroes
+            "00-00000000000000000000000000000000-0000000000000000-00",
+            // uppercase hex
+            "00-ABCDEF0123456789ABCDEF0123456789-B9C7C989F97918E1-01",
+        ];
+
+        for invalid in invalid_traceparent {
+            let traceparent: &HeaderValue =
+                &HeaderValue::from_str(invalid).expect("Could not construct HeaderValue");
+
+            let mut header_map = HeaderMap::new();
+
+            header_map.insert("traceparent", traceparent.clone());
+
+            let result = validate_traceparent(&header_map);
+
+            assert!(!result);
+        }
+    }
+
+    #[test]
+    fn validate_traceparent_missing() {}
 }
