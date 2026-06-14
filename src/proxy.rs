@@ -98,47 +98,6 @@ impl Proxy {
         }
     }
 
-    fn insert_x_forwarded_headers(
-        header_map: &mut HeaderMap<HeaderValue>,
-        client_addr: SocketAddr,
-        backend_addr: SocketAddr,
-    ) {
-        // Add X-Forwarded-For, X-Forwarded-Host and X-Forwarded-Proto headers
-        header_map.insert(
-            "X-Forwarded-For",
-            client_addr.ip().to_string().parse().expect("Invalid IP"),
-        );
-        header_map.insert("X-Forwarded-Proto", "http".parse().expect("Invalid Scheme"));
-
-        let original_host = header_map.get("host").cloned();
-        header_map.insert(
-            "Host",
-            backend_addr.to_string().parse().expect("Invalid Host"),
-        );
-
-        if let Some(host) = original_host {
-            header_map.insert("X-Forwarded-Host", host);
-        }
-    }
-
-    fn strip_hop_by_hop_headers(header_map: &mut HeaderMap<HeaderValue>) {
-        // Remove hop-by-hop headers as per RFC 2616 Section 13.5.1
-        let hop_by_hop_headers = [
-            "Connection",
-            "Keep-Alive",
-            "Proxy-Authenticate",
-            "Proxy-Authorization",
-            "TE",
-            "Trailers",
-            "Transfer-Encoding",
-            "Upgrade",
-        ];
-
-        for header in &hop_by_hop_headers {
-            header_map.remove(*header);
-        }
-    }
-
     fn build_error_response(
         status: StatusCode,
         string: &'static [u8],
@@ -181,9 +140,11 @@ impl Proxy {
         };
         *req.uri_mut() = uri;
 
-        Self::insert_x_forwarded_headers(req.headers_mut(), client_addr, backend_addr);
+        insert_x_forwarded_headers(req.headers_mut(), client_addr, backend_addr);
 
-        Self::strip_hop_by_hop_headers(req.headers_mut());
+        strip_hop_by_hop_headers(req.headers_mut());
+
+        propagate_or_strip_otel_context(req.headers_mut());
 
         let _guard = ConnectionGuard::new(Arc::clone(backend));
 
@@ -196,7 +157,7 @@ impl Proxy {
                     start.elapsed().as_secs_f64(),
                 );
 
-                Self::strip_hop_by_hop_headers(resp.headers_mut());
+                strip_hop_by_hop_headers(resp.headers_mut());
 
                 Ok(resp.map(Either::Left))
             }
@@ -230,9 +191,95 @@ impl Proxy {
     }
 }
 
+fn insert_x_forwarded_headers(
+    header_map: &mut HeaderMap<HeaderValue>,
+    client_addr: SocketAddr,
+    backend_addr: SocketAddr,
+) {
+    // Add X-Forwarded-For, X-Forwarded-Host and X-Forwarded-Proto headers
+    header_map.insert(
+        "X-Forwarded-For",
+        client_addr.ip().to_string().parse().expect("Invalid IP"),
+    );
+    header_map.insert("X-Forwarded-Proto", "http".parse().expect("Invalid Scheme"));
+
+    let original_host = header_map.get("host").cloned();
+    header_map.insert(
+        "Host",
+        backend_addr.to_string().parse().expect("Invalid Host"),
+    );
+
+    if let Some(host) = original_host {
+        header_map.insert("X-Forwarded-Host", host);
+    }
+}
+
+fn strip_hop_by_hop_headers(header_map: &mut HeaderMap<HeaderValue>) {
+    // Remove hop-by-hop headers as per RFC 2616 Section 13.5.1
+    let hop_by_hop_headers = [
+        "Connection",
+        "Keep-Alive",
+        "Proxy-Authenticate",
+        "Proxy-Authorization",
+        "TE",
+        "Trailers",
+        "Transfer-Encoding",
+        "Upgrade",
+    ];
+
+    for header in &hop_by_hop_headers {
+        header_map.remove(*header);
+    }
+}
+
+fn validate_traceparent(header_map: &HeaderMap<HeaderValue>) -> bool {
+    fn is_hex_digit_lowercase(s: &str) -> bool {
+        s.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
+    }
+
+    fn is_all_zeros(s: &str) -> bool {
+        s.chars().all(|c| c == '0')
+    }
+
+    let Some(traceparent) = header_map.get("traceparent") else {
+        return false;
+    };
+
+    let Ok(traceparent) = traceparent.to_str() else {
+        return false;
+    };
+    let parts: Vec<&str> = traceparent.split('-').collect();
+
+    parts.len() == 4
+        && parts[0] == "00"
+        && parts[1].len() == 32
+        && parts[2].len() == 16
+        && parts[3].len() == 2
+        && is_hex_digit_lowercase(parts[1])
+        && is_hex_digit_lowercase(parts[2])
+        && is_hex_digit_lowercase(parts[3])
+        && !is_all_zeros(parts[1])
+        && !is_all_zeros(parts[2])
+}
+
+fn strip_incomplete_otel_context(header_map: &mut HeaderMap<HeaderValue>) {
+    let otel_headers = ["traceparent", "tracestate", "baggage"];
+
+    for header in &otel_headers {
+        header_map.remove(*header);
+    }
+}
+
+fn propagate_or_strip_otel_context(header_map: &mut HeaderMap<HeaderValue>) {
+    if !validate_traceparent(header_map) {
+        strip_incomplete_otel_context(header_map);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hyper::header::HeaderName;
     use pretty_assertions::assert_eq;
 
     use crate::backend::BackendPool;
@@ -557,5 +604,209 @@ mod tests {
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
         assert_eq!(resp.text().await.expect("Failed to read response"), "hello");
         assert!(request_data.contains("GET /?foo=bar HTTP/1.1"));
+    }
+
+    #[test]
+    fn test_strip_incomplete_otel_context() {
+        let mut header_map = HeaderMap::new();
+
+        header_map.insert(
+            "traceparent",
+            HeaderValue::from_static("00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01"),
+        );
+        header_map.insert("tracestate", HeaderValue::from_static("foo=bar"));
+        header_map.insert("baggage", HeaderValue::from_static("foo=bar"));
+
+        strip_incomplete_otel_context(&mut header_map);
+
+        assert!(!header_map.contains_key("traceparent"));
+        assert!(!header_map.contains_key("tracestate"));
+        assert!(!header_map.contains_key("baggage"));
+    }
+
+    #[test]
+    fn test_validate_traceparent_ok() {
+        let traceparent: &HeaderValue =
+            &HeaderValue::from_str("00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01")
+                .expect("Could not construct HeaderValue");
+
+        let mut header_map = HeaderMap::new();
+
+        header_map.insert("traceparent", traceparent.clone());
+
+        let result = validate_traceparent(&header_map);
+
+        assert!(result);
+    }
+
+    #[test]
+    fn test_validate_traceparent_malformed() {
+        // A set of invalid W3C TraceContext
+        let invalid_traceparent: Vec<&str> = vec![
+            // invalid length
+            "00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01-01",
+            // invalid version
+            "gg-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01",
+            // missing trace-id
+            "00-b9c7c989f97918e1-01",
+            // invalid trace-id
+            "00-abcdef0123456789abcdef0123456***-b9c7c989f97918e1-01",
+            // missing span-id
+            "00-abcdef0123456789abcdef0123456789-01",
+            // invalid span-id
+            "00-abcdef0123456789abcdef0123456789-b9c7c989f9791***-01",
+            // missing trace-options
+            "00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1",
+            // invalid trace-options
+            "00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-**",
+            // all zeroes
+            "00-00000000000000000000000000000000-0000000000000000-00",
+            // uppercase hex
+            "00-ABCDEF0123456789ABCDEF0123456789-B9C7C989F97918E1-01",
+        ];
+
+        for invalid in invalid_traceparent {
+            let traceparent: &HeaderValue =
+                &HeaderValue::from_str(invalid).expect("Could not construct HeaderValue");
+
+            let mut header_map = HeaderMap::new();
+
+            header_map.insert("traceparent", traceparent.clone());
+
+            let result = validate_traceparent(&header_map);
+
+            assert!(!result);
+        }
+    }
+
+    #[test]
+    fn test_validate_traceparent_missing() {
+        let header_map = HeaderMap::new();
+
+        let result = validate_traceparent(&header_map);
+
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_propagate_otel_context() {
+        let (addr, oneshot) = spawn_mock_backend().await;
+        let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
+
+        let url = spawn_proxy(pool, Algorithm::RoundRobin, None).await;
+
+        let mut header_map = HeaderMap::new();
+        header_map.insert(
+            HeaderName::from_static("traceparent"),
+            HeaderValue::from_static("00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01"),
+        );
+        header_map.insert(
+            HeaderName::from_static("tracestate"),
+            HeaderValue::from_static("foo=bar"),
+        );
+        header_map.insert(
+            HeaderName::from_static("baggage"),
+            HeaderValue::from_static("spam=eggs"),
+        );
+
+        let client = reqwest::Client::new();
+
+        let resp = client
+            .get(url)
+            .headers(header_map)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let request_data = oneshot.await.expect("failed to receive request");
+        assert!(request_data.contains("GET / HTTP/1.1"));
+        assert!(request_data.contains("traceparent"));
+        assert!(request_data.contains("tracestate"));
+        assert!(request_data.contains("baggage"));
+    }
+
+    #[tokio::test]
+    async fn test_dont_propagate_incomplete_otel_context() {
+        let (addr, oneshot) = spawn_mock_backend().await;
+        let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
+
+        let url = spawn_proxy(pool, Algorithm::RoundRobin, None).await;
+
+        let mut header_map = HeaderMap::new();
+        header_map.insert(
+            HeaderName::from_static("tracestate"),
+            HeaderValue::from_static("foo=bar"),
+        );
+        header_map.insert(
+            HeaderName::from_static("baggage"),
+            HeaderValue::from_static("spam=eggs"),
+        );
+
+        let client = reqwest::Client::new();
+
+        let resp = client
+            .get(url)
+            .headers(header_map)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let request_data = oneshot.await.expect("failed to receive request");
+        assert!(request_data.contains("GET / HTTP/1.1"));
+        assert!(!request_data.contains("traceparent"));
+        assert!(!request_data.contains("tracestate"));
+        assert!(!request_data.contains("baggage"));
+    }
+
+    #[tokio::test]
+    async fn test_strip_malformed_otel_context() {
+        let malformed_traceparents: Vec<&str> = vec![
+            "00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01-GG",
+            "00-abcdef0123456789abcdef0123456789-b9c7c989f97918GG-01",
+            "GG-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01",
+            "00-abcdef0123456789abcdef01234567gg-b9c7c989f97918e1",
+            "abcdEf0123456789abcdef0123456789",
+            "foobar",
+            "00-a1e-b9-01",
+        ];
+
+        for malformed in malformed_traceparents {
+            let (addr, oneshot) = spawn_mock_backend().await;
+            let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
+
+            let url = spawn_proxy(pool, Algorithm::RoundRobin, None).await;
+
+            let mut header_map = HeaderMap::new();
+            header_map.insert(
+                HeaderName::from_static("traceparent"),
+                HeaderValue::from_static(malformed),
+            );
+            header_map.insert(
+                HeaderName::from_static("tracestate"),
+                HeaderValue::from_static("foo=bar"),
+            );
+            header_map.insert(
+                HeaderName::from_static("baggage"),
+                HeaderValue::from_static("spam=eggs"),
+            );
+
+            let client = reqwest::Client::new();
+
+            let resp = client
+                .get(url)
+                .headers(header_map)
+                .send()
+                .await
+                .expect("Request failed");
+
+            assert_eq!(resp.status(), reqwest::StatusCode::OK);
+            let request_data = oneshot.await.expect("failed to receive request");
+            assert!(request_data.contains("GET / HTTP/1.1"));
+            assert!(!request_data.contains("traceparent"));
+            assert!(!request_data.contains("tracestate"));
+            assert!(!request_data.contains("baggage"));
+        }
     }
 }
