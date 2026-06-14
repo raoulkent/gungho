@@ -279,6 +279,7 @@ fn propagate_or_strip_otel_context(header_map: &mut HeaderMap<HeaderValue>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hyper::header::HeaderName;
     use pretty_assertions::assert_eq;
 
     use crate::backend::BackendPool;
@@ -685,5 +686,127 @@ mod tests {
         let result = validate_traceparent(&header_map);
 
         assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_propagate_otel_context() {
+        let (addr, oneshot) = spawn_mock_backend().await;
+        let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
+
+        let url = spawn_proxy(pool, Algorithm::RoundRobin, None).await;
+
+        let mut header_map = HeaderMap::new();
+        header_map.insert(
+            HeaderName::from_static("traceparent"),
+            HeaderValue::from_static("00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01"),
+        );
+        header_map.insert(
+            HeaderName::from_static("tracestate"),
+            HeaderValue::from_static("foo=bar"),
+        );
+        header_map.insert(
+            HeaderName::from_static("baggage"),
+            HeaderValue::from_static("spam=eggs"),
+        );
+
+        let client = reqwest::Client::new();
+
+        let resp = client
+            .get(url)
+            .headers(header_map)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let request_data = oneshot.await.expect("failed to receive request");
+        assert!(request_data.contains("GET / HTTP/1.1"));
+        assert!(request_data.contains("traceparent"));
+        assert!(request_data.contains("tracestate"));
+        assert!(request_data.contains("baggage"));
+    }
+
+    #[tokio::test]
+    async fn test_dont_propagate_incomplete_otel_context() {
+        let (addr, oneshot) = spawn_mock_backend().await;
+        let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
+
+        let url = spawn_proxy(pool, Algorithm::RoundRobin, None).await;
+
+        let mut header_map = HeaderMap::new();
+        header_map.insert(
+            HeaderName::from_static("tracestate"),
+            HeaderValue::from_static("foo=bar"),
+        );
+        header_map.insert(
+            HeaderName::from_static("baggage"),
+            HeaderValue::from_static("spam=eggs"),
+        );
+
+        let client = reqwest::Client::new();
+
+        let resp = client
+            .get(url)
+            .headers(header_map)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let request_data = oneshot.await.expect("failed to receive request");
+        assert!(request_data.contains("GET / HTTP/1.1"));
+        assert!(!request_data.contains("traceparent"));
+        assert!(!request_data.contains("tracestate"));
+        assert!(!request_data.contains("baggage"));
+    }
+
+    #[tokio::test]
+    async fn test_strip_malformed_otel_context() {
+        let malformed_traceparents: Vec<&str> = vec![
+            "00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01-GG",
+            "00-abcdef0123456789abcdef0123456789-b9c7c989f97918GG-01",
+            "GG-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01",
+            "00-abcdef0123456789abcdef01234567gg-b9c7c989f97918e1",
+            "abcdEf0123456789abcdef0123456789",
+            "foobar",
+            "00-a1e-b9-01",
+        ];
+
+        for malformed in malformed_traceparents {
+            let (addr, oneshot) = spawn_mock_backend().await;
+            let pool = Arc::new(setup_pool(&[BackendConfig { addr, weight: 1 }]));
+
+            let url = spawn_proxy(pool, Algorithm::RoundRobin, None).await;
+
+            let mut header_map = HeaderMap::new();
+            header_map.insert(
+                HeaderName::from_static("traceparent"),
+                HeaderValue::from_static(malformed),
+            );
+            header_map.insert(
+                HeaderName::from_static("tracestate"),
+                HeaderValue::from_static("foo=bar"),
+            );
+            header_map.insert(
+                HeaderName::from_static("baggage"),
+                HeaderValue::from_static("spam=eggs"),
+            );
+
+            let client = reqwest::Client::new();
+
+            let resp = client
+                .get(url)
+                .headers(header_map)
+                .send()
+                .await
+                .expect("Request failed");
+
+            assert_eq!(resp.status(), reqwest::StatusCode::OK);
+            let request_data = oneshot.await.expect("failed to receive request");
+            assert!(request_data.contains("GET / HTTP/1.1"));
+            assert!(!request_data.contains("traceparent"));
+            assert!(!request_data.contains("tracestate"));
+            assert!(!request_data.contains("baggage"));
+        }
     }
 }
