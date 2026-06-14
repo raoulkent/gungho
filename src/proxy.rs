@@ -624,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_traceparent_ok() {
+    fn test_validate_traceparent_ok() {
         let traceparent: &HeaderValue =
             &HeaderValue::from_str("00-abcdef0123456789abcdef0123456789-b9c7c989f97918e1-01")
                 .expect("Could not construct HeaderValue");
@@ -639,7 +639,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_traceparent_malformed() {
+    fn test_validate_traceparent_malformed() {
         // A set of invalid W3C TraceContext
         let invalid_traceparent: Vec<&str> = vec![
             // invalid length
@@ -679,7 +679,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_traceparent_missing() {
+    fn test_validate_traceparent_missing() {
         let header_map = HeaderMap::new();
 
         let result = validate_traceparent(&header_map);
