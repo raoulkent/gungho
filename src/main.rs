@@ -24,6 +24,9 @@ mod admin;
 #[allow(dead_code)]
 mod logging;
 
+#[allow(dead_code)]
+mod tracing_otel;
+
 fn main() -> anyhow::Result<()> {
     logging::init_logging("info", logging::LogFormat::Pretty)?;
     info!("Hello, world!");
