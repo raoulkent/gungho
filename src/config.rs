@@ -97,9 +97,28 @@ impl Default for TimeoutConfig {
     }
 }
 
+#[derive(Deserialize, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
+#[serde(default)]
+pub struct TracingConfig {
+    pub enabled: bool,
+    pub endpoint: String,
+    pub sample_rate: f64,
+}
+
+impl Default for TracingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            endpoint: String::from("http://0.0.0.0:4317"),
+            sample_rate: 1.0,
+        }
+    }
+}
+
 // --- Primary type ---
 
-#[derive(Deserialize, PartialEq, Eq, Debug)]
+#[derive(Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
 #[serde(default)]
 pub struct Config {
@@ -111,6 +130,7 @@ pub struct Config {
     pub timeouts: TimeoutConfig,
     pub max_connections: u32,
     pub log_format: LogFormat,
+    pub tracing: TracingConfig,
 }
 
 impl Config {
@@ -160,6 +180,7 @@ impl Default for Config {
             timeouts: TimeoutConfig::default(),
             max_connections: 0, // 0 = unlimited
             log_format: LogFormat::default(),
+            tracing: TracingConfig::default(),
         }
     }
 }
@@ -230,6 +251,7 @@ mod tests {
             },
             max_connections: 1000,
             log_format: LogFormat::Pretty,
+            tracing: TracingConfig::default(),
         };
 
         assert_eq!(config.expect("failed to read config"), expected);
