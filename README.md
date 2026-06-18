@@ -19,7 +19,7 @@ cargo clippy  # pedantic + nursery + unwrap_used, clean
 cargo fmt     # nightly, imports_granularity = Module
 ```
 
-## What works today
+## Subsystem status
 
 | Subsystem | Module | State |
 |---|---|---|
@@ -75,6 +75,10 @@ flowchart LR
     probes -->|liveness / readiness| admin
 ```
 
+The diagram shows the intended wiring: the proxy, health checker, and admin server share one
+backend pool and one metrics registry. That sharing happens once `main` is wired. Today each
+component constructs its own pool and metrics and is tested in isolation.
+
 ### Request path
 
 Every request picks a backend from the cached healthy set, rewrites headers, and forwards
@@ -116,15 +120,15 @@ sequenceDiagram
 ### Health state machine
 
 The checker polls each backend on an interval and counts consecutive results. A backend flips
-state only after crossing the configured threshold, which avoids flapping on a single blip.
+state only after crossing the configured threshold. A single opposite result resets the running
+count but does not change the state, which is what avoids flapping on a one-off blip.
 
 ```mermaid
 stateDiagram-v2
+    direction LR
     [*] --> Healthy
-    Healthy --> Unhealthy: consecutive failures >= unhealthy_threshold
-    Unhealthy --> Healthy: consecutive successes >= healthy_threshold
-    Healthy --> Healthy: success resets failure count
-    Unhealthy --> Unhealthy: failure resets success count
+    Healthy --> Unhealthy: unhealthy_threshold consecutive failures
+    Unhealthy --> Healthy: healthy_threshold consecutive successes
 ```
 
 ## Load balancing
@@ -189,6 +193,10 @@ write = 30
 
 Most fields have defaults, so a minimal config is one or more `[[backends]]` entries with an `addr`.
 The `weight` field defaults to `1`.
+
+Two fields parse but are not enforced yet, since the binary is unwired: `max_connections` (no
+connection cap is applied) and the split `connect` / `read` / `write` timeouts (the proxy currently
+applies one timeout to the whole backend request). Both are in place for when `main` is wired.
 
 ## Admin endpoints
 
@@ -262,11 +270,16 @@ gungho/
 
 ## Design notes
 
-- **Lock-free hot path.** `Backend` health and active-connection counts are atomics, not mutexes.
-  The proxy reads an `Arc<Vec<Arc<Backend>>>` snapshot of the healthy set, which the pool swaps out
-  when health changes. Selecting a backend takes no locks.
-- **Drop guard for connection counts.** A `ConnectionGuard` increments on creation and decrements
-  on `Drop`, so the active-connection gauge stays correct across early returns, errors, and panics.
+- **Atomic per-backend state.** Each `Backend` holds its health (`AtomicBool`) and active-connection
+  count (`AtomicUsize`) as atomics, not mutexes, so the per-request reads and the connection counting
+  take no locks.
+- **Cached healthy snapshot.** The pool keeps the healthy subset as an `Arc<Vec<Arc<Backend>>>` behind
+  an `RwLock`. The request path takes a short read lock to clone the `Arc`, then works against that
+  snapshot; the lock is held only for the clone, and readers do not block each other. The health
+  checker rebuilds the snapshot under a write lock when a backend changes state.
+- **Drop guard for connection counts.** A `ConnectionGuard` increments the backend's
+  `active_connections` counter on creation and decrements it on `Drop`, so the count stays correct
+  across early returns, errors, and panics. Least Connections reads this counter to pick a backend.
 - **Cancellation over flags.** The health checker and admin server stop on a
   `tokio_util::sync::CancellationToken` rather than polling a shared boolean.
 - **Errors are typed.** `config.rs` and `backend.rs` use `thiserror` enums (`ConfigError`,
