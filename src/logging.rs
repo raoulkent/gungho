@@ -21,8 +21,12 @@ fn build_subscriber(log_level: &str, format: LogFormat) -> anyhow::Result<impl S
         LogFormat::Pretty => fmt::layer().pretty().boxed(),
         LogFormat::Json => fmt::layer().json().boxed(),
     };
+    let otel_layer = tracing_opentelemetry::layer().boxed();
 
-    Ok(tracing_subscriber::registry().with(filter).with(fmt_layer))
+    Ok(tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .with(otel_layer))
 }
 
 pub fn init_logging(log_level: &str, format: LogFormat) -> anyhow::Result<()> {
