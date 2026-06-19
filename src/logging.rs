@@ -1,3 +1,4 @@
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use serde::Deserialize;
 
 use std::env::{VarError, var};
@@ -29,7 +30,11 @@ fn build_subscriber(log_level: &str, format: LogFormat) -> anyhow::Result<impl S
         .with(otel_layer))
 }
 
-pub fn init_logging(log_level: &str, format: LogFormat) -> anyhow::Result<()> {
+pub fn init_logging(
+    log_level: &str,
+    format: LogFormat,
+    _tracer_provider: &SdkTracerProvider,
+) -> anyhow::Result<()> {
     let subscriber = build_subscriber(log_level, format)?;
     subscriber.try_init()?;
     Ok(())

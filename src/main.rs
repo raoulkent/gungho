@@ -30,13 +30,13 @@ mod tracing_otel;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let default_config = config::Config::default();
-    let trace_provider =
+    let tracer_provider =
         tracing_otel::init_tracer(&default_config.tracing).expect("Failed to init tracer");
 
-    logging::init_logging("info", logging::LogFormat::Pretty)?;
+    logging::init_logging("info", logging::LogFormat::Pretty, &tracer_provider)?;
     info!("Hello, world!");
 
-    tracing_otel::shutdown_tracer(&trace_provider)?;
+    tracing_otel::shutdown_tracer(&tracer_provider)?;
 
     Ok(())
 }
