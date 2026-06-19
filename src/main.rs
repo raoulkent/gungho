@@ -27,9 +27,16 @@ mod logging;
 #[allow(dead_code)]
 mod tracing_otel;
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let default_config = config::Config::default();
+    let trace_provider =
+        tracing_otel::init_tracer(&default_config.tracing).expect("Failed to init tracer");
+
     logging::init_logging("info", logging::LogFormat::Pretty)?;
     info!("Hello, world!");
+
+    tracing_otel::shutdown_tracer(&trace_provider)?;
 
     Ok(())
 }
