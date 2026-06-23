@@ -33,10 +33,12 @@ async fn main() -> anyhow::Result<()> {
     let tracer_provider =
         tracing_otel::init_tracer(&default_config.tracing).expect("Failed to init tracer");
 
-    logging::init_logging("info", logging::LogFormat::Pretty, &tracer_provider)?;
+    logging::init_logging("info", logging::LogFormat::Pretty, tracer_provider.as_ref())?;
     info!("Hello, world!");
 
-    tracing_otel::shutdown_tracer(&tracer_provider)?;
+    if let Some(tracer_provider) = tracer_provider {
+        tracing_otel::shutdown_tracer(&tracer_provider)?;
+    }
 
     Ok(())
 }

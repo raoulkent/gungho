@@ -20,7 +20,7 @@ pub enum LogFormat {
 fn build_subscriber(
     log_level: &str,
     format: LogFormat,
-    tracer_provider: &SdkTracerProvider,
+    tracer_provider: Option<&SdkTracerProvider>,
 ) -> anyhow::Result<impl Subscriber> {
     let filter = build_filter(log_level)?;
     let fmt_layer = match format {
@@ -28,8 +28,10 @@ fn build_subscriber(
         LogFormat::Json => fmt::layer().json().boxed(),
     };
 
-    let tracer = tracer_provider.tracer("gungho");
-    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+    let otel_layer = tracer_provider.map(|provider| {
+        let tracer = provider.tracer("gungho");
+        tracing_opentelemetry::layer().with_tracer(tracer)
+    });
 
     Ok(tracing_subscriber::registry()
         .with(filter)
@@ -40,7 +42,7 @@ fn build_subscriber(
 pub fn init_logging(
     log_level: &str,
     format: LogFormat,
-    tracer_provider: &SdkTracerProvider,
+    tracer_provider: Option<&SdkTracerProvider>,
 ) -> anyhow::Result<()> {
     let subscriber = build_subscriber(log_level, format, tracer_provider)?;
     subscriber.try_init()?;

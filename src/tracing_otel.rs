@@ -5,7 +5,11 @@ use std::time::Duration;
 
 use crate::config::TracingConfig;
 
-pub fn init_tracer(config: &TracingConfig) -> anyhow::Result<SdkTracerProvider> {
+pub fn init_tracer(config: &TracingConfig) -> anyhow::Result<Option<SdkTracerProvider>> {
+    if !config.enabled {
+        return Ok(None);
+    }
+
     let endpoint = &config.endpoint;
 
     let resource = Resource::builder().with_service_name("gungho").build();
@@ -21,7 +25,7 @@ pub fn init_tracer(config: &TracingConfig) -> anyhow::Result<SdkTracerProvider> 
         .with_batch_exporter(span_exporter)
         .build();
 
-    Ok(tracer_provider)
+    Ok(Some(tracer_provider))
 }
 
 pub fn shutdown_tracer(provider: &SdkTracerProvider) -> anyhow::Result<()> {
