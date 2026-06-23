@@ -1,4 +1,3 @@
-use opentelemetry::global;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::SdkTracerProvider;
@@ -21,9 +20,6 @@ pub fn init_tracer(config: &TracingConfig) -> anyhow::Result<SdkTracerProvider> 
         .with_resource(resource)
         .with_batch_exporter(span_exporter)
         .build();
-
-    // Set provider to be used as global tracer provider
-    global::set_tracer_provider(tracer_provider.clone());
 
     Ok(tracer_provider)
 }

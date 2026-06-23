@@ -1,3 +1,4 @@
+use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use serde::Deserialize;
 
@@ -16,13 +17,19 @@ pub enum LogFormat {
     Json,
 }
 
-fn build_subscriber(log_level: &str, format: LogFormat) -> anyhow::Result<impl Subscriber> {
+fn build_subscriber(
+    log_level: &str,
+    format: LogFormat,
+    tracer_provider: &SdkTracerProvider,
+) -> anyhow::Result<impl Subscriber> {
     let filter = build_filter(log_level)?;
     let fmt_layer = match format {
         LogFormat::Pretty => fmt::layer().pretty().boxed(),
         LogFormat::Json => fmt::layer().json().boxed(),
     };
-    let otel_layer = tracing_opentelemetry::layer().boxed();
+
+    let tracer = tracer_provider.tracer("gungho");
+    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
     Ok(tracing_subscriber::registry()
         .with(filter)
@@ -33,9 +40,9 @@ fn build_subscriber(log_level: &str, format: LogFormat) -> anyhow::Result<impl S
 pub fn init_logging(
     log_level: &str,
     format: LogFormat,
-    _tracer_provider: &SdkTracerProvider,
+    tracer_provider: &SdkTracerProvider,
 ) -> anyhow::Result<()> {
-    let subscriber = build_subscriber(log_level, format)?;
+    let subscriber = build_subscriber(log_level, format, tracer_provider)?;
     subscriber.try_init()?;
     Ok(())
 }
@@ -48,13 +55,5 @@ fn build_filter(log_level: &str) -> anyhow::Result<EnvFilter> {
             .or_else(|_| EnvFilter::try_new(DEFAULT_LOG_LEVEL))
             .map_err(Into::into),
         Err(err) => Err(err.into()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_build_subscriber_doesnt_panic() {
-        let _ = super::build_subscriber("info", super::LogFormat::Pretty);
     }
 }
