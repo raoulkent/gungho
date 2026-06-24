@@ -3,6 +3,8 @@ use http_body_util::{Either, Full};
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 
+use tracing::Instrument;
+
 use hyper::body::Incoming;
 use hyper::http::header::HeaderValue;
 use hyper::{HeaderMap, Request, Response, StatusCode, Uri};
@@ -113,75 +115,103 @@ impl Proxy {
         mut req: Request<Incoming>,
         client_addr: SocketAddr,
     ) -> Result<Response<Either<Incoming, Full<Bytes>>>, Infallible> {
-        let healthy = self.pool.healthy_backends();
+        let span = tracing::info_span!(
+            "request",
+            "http.method" = req.method().as_str(),
+            "net.peer.ip" = client_addr.ip().to_string(),
+            "lb_algorithm" = ?self.strategy.algorithm(),
+            "gungho.backend" = tracing::field::Empty,
+            "http.status_code" = tracing::field::Empty,
+        );
+
         let start = std::time::Instant::now();
 
-        let Some(index) = self.strategy.select(&healthy, Some(&client_addr)) else {
-            let status = StatusCode::SERVICE_UNAVAILABLE;
-            self.metrics
-                .record_request(status, "none", start.elapsed().as_secs_f64());
+        async move {
+            let healthy = self.pool.healthy_backends();
 
-            return Ok(Self::build_error_response(
-                status,
-                b"No healthy backends available",
-            ));
-        };
+            let Some(index) = self.strategy.select(&healthy, Some(&client_addr)) else {
+                let status = StatusCode::SERVICE_UNAVAILABLE;
+                self.metrics
+                    .record_request(status, "none", start.elapsed().as_secs_f64());
 
-        let backend = &healthy[index];
-        let backend_addr = backend.get_addr();
+                tracing::Span::current().record("http.status_code", status.as_u16());
 
-        let path_and_query = req.uri().path_and_query().map_or("/", |pq| pq.as_str());
-
-        let Ok(uri) = format!("http://{backend_addr}{path_and_query}").parse::<Uri>() else {
-            return Ok(Self::build_error_response(
-                StatusCode::BAD_REQUEST,
-                b"Bad Request",
-            ));
-        };
-        *req.uri_mut() = uri;
-
-        insert_x_forwarded_headers(req.headers_mut(), client_addr, backend_addr);
-
-        strip_hop_by_hop_headers(req.headers_mut());
-
-        propagate_or_strip_otel_context(req.headers_mut());
-
-        let _guard = ConnectionGuard::new(Arc::clone(backend));
-
-        match timeout(self.timeout, self.client.request(req)).await {
-            Ok(Ok(mut resp)) => {
-                let status = resp.status();
-                self.metrics.record_request(
+                return Ok(Self::build_error_response(
                     status,
-                    &backend_addr.to_string(),
-                    start.elapsed().as_secs_f64(),
-                );
+                    b"No healthy backends available",
+                ));
+            };
 
-                strip_hop_by_hop_headers(resp.headers_mut());
+            let backend = &healthy[index];
+            let backend_addr = backend.get_addr();
 
-                Ok(resp.map(Either::Left))
-            }
-            Ok(Err(_)) => {
-                let status = StatusCode::BAD_GATEWAY;
-                self.metrics.record_request(
-                    status,
-                    &backend_addr.to_string(),
-                    start.elapsed().as_secs_f64(),
-                );
+            tracing::Span::current().record("gungho.backend", backend_addr.to_string());
 
-                Ok(Self::build_error_response(status, b"Backend error"))
-            }
-            Err(_) => {
-                let status = StatusCode::GATEWAY_TIMEOUT;
-                self.metrics.record_request(
-                    status,
-                    &backend_addr.to_string(),
-                    start.elapsed().as_secs_f64(),
-                );
+            let path_and_query = req.uri().path_and_query().map_or("/", |pq| pq.as_str());
 
-                Ok(Self::build_error_response(status, b"Gateway Timeout"))
-            }
+            let Ok(uri) = format!("http://{backend_addr}{path_and_query}").parse::<Uri>() else {
+                let status = StatusCode::BAD_REQUEST;
+                tracing::Span::current().record("http.status_code", status.as_u16());
+
+                return Ok(Self::build_error_response(status, b"Bad Request"));
+            };
+            *req.uri_mut() = uri;
+
+            insert_x_forwarded_headers(req.headers_mut(), client_addr, backend_addr);
+
+            strip_hop_by_hop_headers(req.headers_mut());
+
+            propagate_or_strip_otel_context(req.headers_mut());
+
+            let _guard = ConnectionGuard::new(Arc::clone(backend));
+
+            let (response, status) = match timeout(self.timeout, self.client.request(req)).await {
+                Ok(Ok(mut resp)) => {
+                    let status = resp.status();
+                    self.metrics.record_request(
+                        status,
+                        &backend_addr.to_string(),
+                        start.elapsed().as_secs_f64(),
+                    );
+
+                    strip_hop_by_hop_headers(resp.headers_mut());
+
+                    (Ok(resp.map(Either::Left)), status)
+                }
+                Ok(Err(_)) => {
+                    let status = StatusCode::BAD_GATEWAY;
+                    self.metrics.record_request(
+                        status,
+                        &backend_addr.to_string(),
+                        start.elapsed().as_secs_f64(),
+                    );
+
+                    (
+                        Ok(Self::build_error_response(status, b"Backend error")),
+                        status,
+                    )
+                }
+                Err(_) => {
+                    let status = StatusCode::GATEWAY_TIMEOUT;
+                    self.metrics.record_request(
+                        status,
+                        &backend_addr.to_string(),
+                        start.elapsed().as_secs_f64(),
+                    );
+
+                    (
+                        Ok(Self::build_error_response(status, b"Gateway Timeout")),
+                        status,
+                    )
+                }
+            };
+
+            tracing::Span::current().record("http.status_code", status.as_u16());
+
+            response
         }
+        .instrument(span)
+        .await
     }
 
     pub fn addr(&self) -> std::net::SocketAddr {
